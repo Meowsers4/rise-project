@@ -1,0 +1,127 @@
+# Snakefile — SOD1 FEP variant pipeline DAG
+# Skeleton only: rule structure + I/O wiring. Shell/script bodies are stubs (TODO).
+# Design intent lives in README.md; parameters live in config/pipeline.yaml.
+#
+# The DAG:
+#   panel -> prep -> prescreen -> fep -> validate  (gate) -> classify
+#                                    \-> md (mechanism, flagged subset)
+#
+# Stage 3 (fep) is the fan-out: one job per (variant, leg, window, replicate).
+
+configfile: "config/pipeline.yaml"
+
+import csv, os
+
+# ---- Load the panel to build wildcards -------------------------------------
+# variants.csv is the source of truth (Stage 0 output).
+def load_variants():
+    path = config["panel"]["csv"]
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        return [row["variant"] for row in csv.DictReader(f)]
+
+VARIANTS   = load_variants()
+LEGS       = config["fep"]["legs"]
+WINDOWS    = list(range(config["fep"]["lambda_windows"]))
+REPLICATES = list(range(config["fep"]["replicates"]))
+
+
+# ---- Target rule -----------------------------------------------------------
+rule all:
+    input:
+        config["validation"]["outputs"]["ddg_map"],
+
+
+# ---- Stage 0: build & stratify the variant panel ---------------------------
+rule panel:
+    output:
+        config["panel"]["csv"],
+    shell:
+        # TODO: pull ClinVar + ALSoD, cross-ref gnomAD, stratify into buckets,
+        #       enforce mature-numbering offset, fail if no positive controls.
+        "python -m src.panel.build --config config/pipeline.yaml --out {output}"
+
+
+# ---- Stage 1: prepare structure (apo) --------------------------------------
+rule prep:
+    input:
+        panel=config["panel"]["csv"],
+    output:
+        "data/structures/{variant}.pdb",
+    shell:
+        # TODO: apply mutation, apo + reduced disulfide, protonate, solvate, ionize.
+        "python -m src.prep.build --variant {wildcards.variant} "
+        "--config config/pipeline.yaml --out {output}"
+
+
+# ---- Stage 2: cheap empirical prescreen (CPU, all variants) ----------------
+rule prescreen:
+    input:
+        struct="data/structures/{variant}.pdb",
+    output:
+        "results/prescreen/{variant}.json",
+    shell:
+        # TODO: FoldX BuildModel + Rosetta cartesian_ddg; emit ddG estimate.
+        "python -m src.prescreen.run --variant {wildcards.variant} "
+        "--config config/pipeline.yaml --out {output}"
+
+
+# ---- Stage 3: alchemical FEP window (the SLURM array unit) ------------------
+# One invocation == one (variant, leg, window, replicate). Submit as a job array.
+rule fep_window:
+    input:
+        struct="data/structures/{variant}.pdb",
+    output:
+        "results/fep/{variant}/{leg}/w{window}_r{rep}.npz",
+    resources:
+        gpu=1,
+    shell:
+        # TODO: dispatch to chosen framework (openmm_perses|gromacs_pmx|amber_ti).
+        "python -m src.fep.window --variant {wildcards.variant} "
+        "--leg {wildcards.leg} --window {wildcards.window} --rep {wildcards.rep} "
+        "--config config/pipeline.yaml --out {output}"
+
+
+# ---- Stage 3 (cont.): collect windows -> per-variant ddG via MBAR ----------
+rule fep_ddg:
+    input:
+        lambda wc: [
+            f"results/fep/{wc.variant}/{leg}/w{w}_r{r}.npz"
+            for leg in LEGS for w in WINDOWS for r in REPLICATES
+        ],
+    output:
+        "results/fep/{variant}/ddg.json",
+    shell:
+        # TODO: MBAR over both legs, cycle-closure + hysteresis checks.
+        "python -m src.fep.analyze --variant {wildcards.variant} "
+        "--config config/pipeline.yaml --out {output}"
+
+
+# ---- Stage 4: unbiased mechanism MD (flagged subset only) ------------------
+rule md_mechanism:
+    input:
+        struct="data/structures/{variant}.pdb",
+    output:
+        "results/md/{variant}/analysis.json",
+    resources:
+        gpu=1,
+    shell:
+        # TODO: replicate plain MD; rmsf/contacts/salt-bridges/sasa/interface.
+        "python -m src.md.run --variant {wildcards.variant} "
+        "--config config/pipeline.yaml --out {output}"
+
+
+# ---- Stage 5: validation GATE + classification -----------------------------
+# Aggregates all per-variant ddG, checks controls, THEN classifies novel variants.
+rule validate:
+    input:
+        fep=[f"results/fep/{v}/ddg.json" for v in VARIANTS],
+        prescreen=[f"results/prescreen/{v}.json" for v in VARIANTS],
+    output:
+        config["validation"]["outputs"]["ddg_map"],
+    shell:
+        # TODO: correlate FEP vs experimental controls; enforce min_pearson gate;
+        #       cross-check vs prescreen; classify uncharacterized variants.
+        "python -m src.analysis.validate --config config/pipeline.yaml "
+        "--out {output}"

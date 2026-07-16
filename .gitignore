@@ -1,0 +1,5 @@
+results/
+data/structures/
+__pycache__/
+*.npz
+.snakemake/

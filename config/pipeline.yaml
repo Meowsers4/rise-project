@@ -1,0 +1,82 @@
+# pipeline.yaml — global parameters for the SOD1 FEP variant pipeline
+# Every stage reads from here. Do not hardcode these values in scripts.
+# See README.md §9 (Open decisions) — values marked TODO must be set before running.
+
+project:
+  name: sod1-fep
+  target: SOD1
+  uniprot: P00441
+  # Mature protein has initiator Met removed -> 153 residues.
+  # Variant names (A4V, G93A) use MATURE numbering. This offset lives here, once.
+  mature_offset: 1          # precursor_pos = mature_pos + mature_offset
+  n_residues_mature: 153
+
+structure:
+  form: apo                 # apo | holo   -- KEEP apo for v1 (README §2.1)
+  disulfide: reduced        # reduced | oxidized  (apo disease-relevant = reduced)
+  starting_pdb: TODO        # e.g. "2C9V" — choose a high-res human SOD1 structure
+  default_oligomer: monomer # monomer | dimer -- per-variant override in variants.csv
+  water_model: tip3p
+  ff_protein: amber14sb     # or charmm36m if using GROMACS+CHARMM
+  ion_conc_M: 0.15
+
+panel:
+  csv: data/variants.csv
+  target_size: 40           # v1 panel size (README suggests 30-50)
+  require_controls: true    # fail fast if no positive controls present
+  buckets:                  # expected stratification labels
+    - positive_control
+    - negative_control
+    - pathogenic_uncharacterized
+    - vus
+
+prescreen:                  # Stage 2 — cheap empirical ddG (CPU)
+  methods:
+    - foldx
+    - rosetta_cartesian_ddg
+  runs_per_variant: 5       # FoldX BuildModel averaging
+  validate_on_controls: true
+
+fep:                        # Stage 3 — the cluster workhorse (GPU)
+  framework: TODO           # openmm_perses | gromacs_pmx | amber_ti  (README §9)
+  lambda_windows: 18        # 12 | 18 | 24  -- cost vs precision
+  replicates: 5             # >=3 required; 5 recommended
+  legs:                     # thermodynamic cycle
+    - folded                # mutation in the folded protein
+    - unfolded              # mutation in capped tripeptide reference
+  softcore: true
+  estimator: mbar
+  ns_per_window: 5          # production time per lambda window
+  equilibration_ns: 1
+  convergence:
+    max_cycle_closure_kcal: 1.0   # flag if thermodynamic cycle doesn't close
+    check_hysteresis: true
+
+md:                         # Stage 4 — unbiased mechanism MD (GPU, subset)
+  run_on: fep_flagged       # only variants FEP flags as interesting
+  replicates: 3
+  ns_per_replicate: 200
+  analyses:
+    - rmsf
+    - contact_map
+    - salt_bridges
+    - sasa
+    - dimer_interface
+
+validation:                 # Stage 5 — the GATE (README §2.2)
+  gate_on: positive_control
+  min_pearson: 0.6          # go/no-go threshold vs experimental ddG
+  cross_check: [foldx, rosetta_cartesian_ddg]
+  outputs:
+    ddg_map: results/ddg_map.csv
+    figures: results/figures/
+
+cluster:
+  scheduler: slurm
+  partition: TODO           # e.g. "gpu"
+  gpus_available: TODO      # sizes the panel & array chunking
+  gpu_type: TODO            # e.g. "a100"
+  max_walltime_hr: 24
+  array_unit: [variant, leg, window, replicate]   # one SLURM array task per tuple
+  checkpoint: true
+  trajectory_retention: estimates_only            # keep ddG + analysis, drop raw frames
