@@ -32,15 +32,17 @@ is the single source of truth for the panel.
 ## Before writing implementation code
 Resolve the open decisions in `README.md §9` WITH THE USER first — especially:
 - FEP framework (openmm_perses | gromacs_pmx | amber_ti) — shapes all of `src/fep/`.
-- GPU count, partition name, walltime — sizes the panel and SLURM array chunking.
+- GPU count, partition name, walltime — sizes the panel and SGE array chunking.
 Ask these interactively; do not pick defaults and proceed.
 
 ## How to work here
 - Prefer editing existing modules under `src/<stage>/` over adding new top-level code.
 - Every stage is a Snakemake rule; wire new work into the DAG in `workflow/Snakefile`,
   don't create standalone run scripts.
-- Stage 3 is submitted as SLURM job arrays, one task per
+- Stage 3 is submitted as SGE job arrays (`qsub -t`) on the BU SCC — one task per
   `(variant, leg, window, replicate)`. Keep that granularity — it's the whole point.
+- GPUs are requested via `-l gpus=1 -l gpu_c=7.0` and assigned by the scheduler
+  through `CUDA_VISIBLE_DEVICES`; never hardcode device IDs (one window = one GPU).
 - Checkpoint long GPU jobs; assume windows will die and must resume.
 - Honor `cluster.trajectory_retention` — do not persist raw frames when the config
   says estimates only (disk fills fast).

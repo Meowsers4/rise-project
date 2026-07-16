@@ -1,6 +1,6 @@
 # pipeline.yaml — global parameters for the SOD1 FEP variant pipeline
 # Every stage reads from here. Do not hardcode these values in scripts.
-# See README.md §9 (Open decisions) — values marked TODO must be set before running.
+# README.md §9 (Open decisions) resolved 2026-07-16 with the user. No TODOs remain.
 
 project:
   name: sod1-fep
@@ -14,8 +14,10 @@ project:
 structure:
   form: apo                 # apo | holo   -- KEEP apo for v1 (README §2.1)
   disulfide: reduced        # reduced | oxidized  (apo disease-relevant = reduced)
-  starting_pdb: TODO        # e.g. "2C9V" — choose a high-res human SOD1 structure
+  starting_pdb: 3ECU        # apo, reduced, WT human SOD1 dimer, 1.90 Å (RCSB 3ECU)
+  fallback_pdb: 2C9V        # 1.07 Å metallated; strip metals + re-equilibrate IF apo loop rebuild is unstable
   default_oligomer: monomer # monomer | dimer -- per-variant override in variants.csv
+  interface_cutoff_A: 5.0   # residue -> dimer if any heavy atom within this of the partner monomer (Stage 0)
   water_model: tip3p
   ff_protein: amber14sb     # or charmm36m if using GROMACS+CHARMM
   ion_conc_M: 0.15
@@ -23,6 +25,7 @@ structure:
 panel:
   csv: data/variants.csv
   target_size: 40           # v1 panel size (README suggests 30-50)
+  min_positive_controls: 10 # gate power depends on control count+spread (D3); quality over count
   require_controls: true    # fail fast if no positive controls present
   buckets:                  # expected stratification labels
     - positive_control
@@ -38,7 +41,7 @@ prescreen:                  # Stage 2 — cheap empirical ddG (CPU)
   validate_on_controls: true
 
 fep:                        # Stage 3 — the cluster workhorse (GPU)
-  framework: TODO           # openmm_perses | gromacs_pmx | amber_ti  (README §9)
+  framework: openmm_perses  # openmm_perses | gromacs_pmx | amber_ti  (resolved: OpenMM+Perses)
   lambda_windows: 18        # 12 | 18 | 24  -- cost vs precision
   replicates: 5             # >=3 required; 5 recommended
   legs:                     # thermodynamic cycle
@@ -72,11 +75,12 @@ validation:                 # Stage 5 — the GATE (README §2.2)
     figures: results/figures/
 
 cluster:
-  scheduler: slurm
-  partition: TODO           # e.g. "gpu"
-  gpus_available: TODO      # sizes the panel & array chunking
-  gpu_type: TODO            # e.g. "a100"
-  max_walltime_hr: 24
-  array_unit: [variant, leg, window, replicate]   # one SLURM array task per tuple
+  scheduler: sge                 # BU SCC runs Open Grid Scheduler (SGE/OGS), NOT SLURM
+  project: rise-batteries        # SGE -P flag
+  gpu_c: "7.0"                   # request GPUs by compute capability >=7.0, not by model name
+  gpus_available: 8              # planning/throughput number ONLY -- not requested in a single qsub
+  pe_omp: 8                      # -pe omp slots (CPU cores per task)
+  max_walltime_hr: 12            # stay <=12h to keep buy-in nodes in the pool
+  array_unit: [variant, leg, window, replicate]   # one SGE array task (qsub -t) per tuple
   checkpoint: true
   trajectory_retention: estimates_only            # keep ddG + analysis, drop raw frames

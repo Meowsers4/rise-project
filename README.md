@@ -144,8 +144,10 @@ scales linearly with GPU count.
 
 - **Workflow manager:** Snakemake or Nextflow — the DAG
   (prep → prescreen → FEP windows → analysis) must be reproducible and restartable.
-- **Scheduler:** SLURM **job arrays** — one array task per
-  `(variant, leg, window, replicate)`.
+- **Scheduler:** SGE/OGS (BU SCC) **job arrays** (`qsub -t`) — one array task per
+  `(variant, leg, window, replicate)`. GPUs requested by compute capability
+  (`-l gpus=1 -l gpu_c=7.0`), never by model; the scheduler assigns the device via
+  `CUDA_VISIBLE_DEVICES`, so the FEP code must not hardcode it.
 - **Checkpoint everything** — windows die; never restart from zero.
 - **Trajectory retention policy up front** — full FEP trajectories are large.
   Keep free-energy estimates + analysis outputs; downsample or discard raw frames.
@@ -164,8 +166,7 @@ sod1-fep/
 │   ├── variants.csv           # Stage 0 output (the source of truth)
 │   └── structures/            # prepared PDBs, per variant
 ├── config/
-│   ├── pipeline.yaml          # global params: replicates, λ count, sim lengths
-│   └── slurm.yaml             # partitions, GPU counts, walltimes
+│   └── pipeline.yaml          # global params incl. cluster block (SGE): project, gpu_c, walltime
 ├── workflow/
 │   └── Snakefile              # or main.nf
 ├── src/
@@ -176,7 +177,7 @@ sod1-fep/
 │   ├── md/                    # Stage 4: unbiased MD + analysis
 │   └── analysis/              # Stage 5: validation, plots, classification
 ├── scripts/
-│   └── submit_array.sh        # SLURM array submission helper
+│   └── submit_array.sh        # SGE array submission helper (qsub -t)
 ├── results/
 │   ├── ddg_map.csv
 │   └── figures/
@@ -196,7 +197,7 @@ sod1-fep/
 | Free-energy math   | pymbar (MBAR)                                        |
 | Trajectory analysis| MDTraj / MDAnalysis                                  |
 | Workflow           | Snakemake or Nextflow                                |
-| Scheduler          | SLURM (job arrays)                                   |
+| Scheduler          | SGE/OGS (BU SCC), job arrays (`qsub -t`)              |
 | Structure prep     | PDBFixer, PROPKA/H++                                 |
 
 ---
@@ -218,7 +219,7 @@ sod1-fep/
 An agent should ask the user to resolve these before writing implementation code:
 
 - **FEP framework:** OpenMM+Perses vs GROMACS+pmx vs AMBER TI? (Shapes all of Stage 3
-  and the SLURM array structure.)
+  and the SGE array structure.)
 - **GPU count / partition names / walltime limits** on the target cluster? (Sizes the
   panel and the array chunking.)
 - **Panel size for v1:** how many variants (≈30–50 suggested)?

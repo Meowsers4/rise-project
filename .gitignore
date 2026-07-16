@@ -3,3 +3,5 @@ data/structures/
 __pycache__/
 *.npz
 .snakemake/
+.DS_Store
+.pytest_cache/

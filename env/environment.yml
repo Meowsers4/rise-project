@@ -1,0 +1,32 @@
+# Conda environment for the SOD1 FEP variant pipeline.
+#   conda env create -f env/environment.yml   (or: mamba env create -f ...)
+#   conda activate sod1-fep
+#
+# FoldX and Rosetta (Stage 2) are licensed and module-loaded on the SCC, NOT conda
+# packages -- see env/modules.md. GPU builds of OpenMM come from conda-forge; on the
+# SCC load the matching CUDA module before running (env/modules.md).
+name: sod1-fep
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  # --- MD / alchemical FEP (D1: OpenMM + Perses) ---
+  - openmm>=8.1
+  - openmmtools
+  - perses
+  - pymbar>=4
+  # --- structure prep (Stage 1) ---
+  - pdbfixer
+  - propka
+  # --- trajectory analysis (Stage 4) ---
+  - mdtraj
+  - mdanalysis
+  # --- data / workflow / scientific stack ---
+  - numpy
+  - scipy
+  - pandas
+  - pyyaml
+  - snakemake-minimal
+  # --- dev / test ---
+  - pytest
+  - pip

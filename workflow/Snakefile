@@ -7,6 +7,8 @@
 #                                    \-> md (mechanism, flagged subset)
 #
 # Stage 3 (fep) is the fan-out: one job per (variant, leg, window, replicate).
+# Scheduler is SGE/OGS on the BU SCC: Stage 3 dispatches via scripts/submit_array.sh
+# (qsub -t array); this Snakefile stays the DAG / dependency source of truth.
 
 configfile: "config/pipeline.yaml"
 
@@ -68,7 +70,9 @@ rule prescreen:
 
 
 # ---- Stage 3: alchemical FEP window (the SLURM array unit) ------------------
-# One invocation == one (variant, leg, window, replicate). Submit as a job array.
+# One invocation == one (variant, leg, window, replicate). Submit as an SGE array
+# (qsub -t) via scripts/submit_array.sh. Use the scheduler-assigned
+# CUDA_VISIBLE_DEVICES as-is inside src.fep.window -- never hardcode a device id.
 rule fep_window:
     input:
         struct="data/structures/{variant}.pdb",
