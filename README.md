@@ -1,157 +1,240 @@
-# Hand-grading the newspaper claims
+# SOD1 Variant Stability Pipeline
 
-## Why you are doing this
+A GPU-cluster pipeline that computes protein-stability changes (ΔΔG of folding)
+for a panel of clinically observed **SOD1** variants using rigorous **alchemical
+free-energy (FEP/TI)** calculations, validated against experimentally measured
+controls, then extended to interpret uncharacterized ALS variants.
 
-An LLM (Llama 3.3 on Groq) reads all 1,324 scraped newspaper sentences and labels
-each one. Nobody should take that on faith. So two people hand-label a random 80
-of those same sentences, and we measure how often the humans and the LLM agree.
+> **Status:** specification / scaffolding. No code written yet. This README is the
+> design contract. See [Open decisions](#open-decisions) — resolve those before
+> generating implementation code.
 
-**Your labels are not training data.** Nothing is trained on them. They are a
-report card. If the agreement number is good, we trust the LLM's labels on the
-other ~1,244 claims and move on. If it's bad, we rewrite the rubric prompt in
-`grade_claims.py` and re-run the LLM.
+---
 
-The number we compute is **Cohen's kappa**. It measures agreement *after
-subtracting out the agreement you'd get by luck alone*. If 80% of claims are
-"worsen," two people guessing "worsen" every time agree 80% of the time and have
-learned nothing — kappa correctly scores that 0. Kappa ≥ 0.6 is "substantial"
-and is the publishable floor; ≥ 0.8 is near-perfect.
+## 1. What this project is (and is not)
 
-Without this, the methods section reads "we asked an AI and believed it." That is
-the first thing a judge will attack.
+**Goal:** produce a validated ΔΔG map across the SOD1 variant landscape that flags
+which uncharacterized variants are likely destabilizing (and therefore plausibly
+pathogenic) and which are not.
 
-## The rules
+This is a **hybrid methods/target** project:
+- *Target:* SOD1 (Cu/Zn superoxide dismutase, UniProt **P00441**), a 153-residue
+  soluble homodimer implicated in familial ALS.
+- *Method question:* can FEP-on-a-cluster reliably triage clinical variants when
+  benchmarked against known experimental stabilities?
 
-1. **Two graders, independently.** Vincent takes one copy, Jeremy takes the other.
-2. **Do not talk to each other while grading.** Not about individual claims, not
-   about your general approach. If you discuss it, you've measured your
-   conversation, not the reliability of the coding scheme.
-3. **Do not look at `claims_graded.csv`.** That file has the LLM's answers in it.
-   Peeking destroys the whole point.
-4. **Grade only what the sentence itself says.** Not what you know happened next.
-   You know 1929 was a catastrophe; the sentence doesn't. Judge the sentence.
-5. **Disagreements are data, not failures.** The sentences you two split on are
-   the ones the LLM is also getting wrong. Don't try to converge.
+**In scope:** structure prep, empirical prescreen, alchemical ΔΔG, mechanism MD,
+validation, variant classification, cluster orchestration.
 
-Budget 2–3 hours each. The sentences are short; the borderline cases are what
-take the time, and those are the point.
+**Out of scope (for v1):** wet-lab work, holo/metal-bound simulations (see
+[§4.1](#41-apo-first-decision)), ligand docking, ML surrogate models. These are
+possible later arms, not the first deliverable.
 
-## Setup
+---
 
-Each of you makes your own copy of the blank file:
+## 2. Core design decisions (do not silently override)
 
-```
-cd JeremysShit/handgrade_newspapers
-cp handgrade_BLANK.csv handgrade_vincent.csv
-cp handgrade_BLANK.csv handgrade_jeremy.csv
-```
+These two decisions propagate through the entire pipeline. An agent modifying this
+project must treat changing either one as a scope change, not a refactor.
 
-Open your own copy in Excel or Google Sheets. Fill in the five `human_*` columns.
-Leave everything else alone — `claim_id` is what joins your work back to the data.
+### 2.1 Apo-first
+Simulate the **apo, disulfide-reduced** form in v1.
+- **Why:** avoids metalloprotein force-field parameterization (Cu/Zn coordination),
+  AND lands on the aggregation-prone, disease-relevant species. Rare case where the
+  simplification is also the more biologically correct choice.
+- Holo/metal-bound is a **separate parameterized arm**, not a config flag.
 
-The 80 claims are 8 from each of the 10 episodes, shuffled, so you cannot tell
-which crisis (or control window) a sentence came from without looking at `date`.
-That is deliberate. Try not to look at the date until after you've decided.
+### 2.2 Control validation is a GATE, not a final step
+Before spending cluster time on uncharacterized variants, reproduce the **known
+experimental ΔΔG** of the characterized controls (A4V, G93A, G37R, …).
+- If the control correlation is poor, extending to novel variants produces
+  confident nonsense. Treat this as **go/no-go**.
+- The control-reproduction result is itself a presentable outcome.
 
-## What to type in each column
+---
 
-These come from OCR'd newspaper scans, so expect garbled text: `tho` for `the`,
-`cor porations` for `corporations`, random `<yid` noise. Read through it.
-
-### `human_is_prediction` → `yes` or `no`
-
-`yes` only if the sentence makes a **falsifiable claim about future economic
-conditions** — business, prices, employment, markets, prosperity, recession.
-
-Say `no` for:
-- retrospectives ("the panic ruined us")
-- descriptions of the present ("stocks fell today")
-- advertisements
-- non-economic content (court rulings, land inspectors, elections)
-- OCR garbage you can't parse
-
-**The hard case, and the one that matters most.** A sentence like
-*"President Roosevelt Thinks It Unnecessary as Panic Is Nearly Over"* is
-partly a statement about the present and partly a claim that things will
-improve. There is no right answer here — there is only your answer, and
-whether the other grader and the LLM reach the same one. Make a call, write
-your reasoning in `human_notes`, and move on.
-
-Getting this boundary wrong in a *systematic* way is dangerous. If retrospectives
-get filed as predictions, a paper printed the day after the 1929 crash saying
-"we are ruined" scores as a brilliant forecast. That is fake signal, and it is
-the single biggest threat to this project's credibility.
-
-If `human_is_prediction` is `no`, **leave the next three columns blank.**
-
-### `human_topic` → one of
-
-| value | use when the claim is about |
-|---|---|
-| `general_business` | overall business conditions, prosperity, recession, "the outlook" |
-| `prices` | inflation, deflation, cost of living, commodity prices |
-| `employment` | jobs, unemployment, layoffs, hiring |
-| `markets` | stocks, bonds, corporate earnings, Wall Street |
-| `other` | economic but none of the above |
-
-If it spans two, pick the one the sentence is *most* about.
-
-### `human_direction` → one of
-
-What does the claim say **economic conditions** will do?
-
-- `improve` — recovery, prosperity returning, business picking up
-- `worsen` — depression, panic, slump, downturn coming
-- `no_change` — explicitly says things stay flat
-- `unclear` — it's a prediction, but you genuinely can't tell which way
-
-Careful with `prices` claims: *rising prices* is not automatically `improve`.
-Ask what the sentence implies for **conditions overall**. "Prices will soar"
-in a 1920 deflation context reads as recovery; the same phrase in 1945 reads
-as ruinous inflation. Use the sentence's own framing, and if it gives you
-nothing, use `unclear`.
-
-### `human_confidence` → `assertive` or `hedged`
-
-- `assertive` — *will*, *is certain*, *undoubtedly*, *there can be no doubt*
-- `hedged` — *may*, *might*, *likely*, *is expected*, *if*, *some believe*
-
-Judge the words, not the speaker's authority.
-
-### `human_notes` → free text, optional
-
-Use it whenever you hesitated. Write *why*. These notes are what you'll use to
-rewrite the rubric if kappa comes back low, and they become the "coding
-decisions" paragraph of the methods section. Notes on the cases you found hard
-are worth more than notes on the easy ones.
-
-## When you're both done
-
-From `JeremysShit/`:
+## 3. Pipeline overview
 
 ```
-python handgrade_newspapers/kappa.py \
-    --graders handgrade_newspapers/handgrade_vincent.csv \
-              handgrade_newspapers/handgrade_jeremy.csv
+Stage 0  Build variant panel        (CPU, data)     controls + uncharacterized
+Stage 1  Prepare structure          (CPU)           apo, protonate, solvate
+Stage 2  Cheap prescreen            (CPU)           FoldX / Rosetta, ALL variants
+Stage 3  Alchemical FEP  ★          (GPU, cluster)  ΔΔG — the workhorse
+Stage 4  Unbiased MD                (GPU)           mechanism, subset only
+Stage 5  Validate + interpret       (CPU)           controls gate, then novel
 ```
 
-`--graded` defaults to `claims_graded.csv` in the arm root; pass it explicitly
-only if the LLM output lives somewhere else.
+★ Stage 3 is the parallel cluster stage. Its job count fans out as:
 
-You get two blocks of numbers.
+```
+jobs  =  variants × 2 legs × λ-windows × replicates
+      ≈  40 × 2 × 18 × 5  ≈  7,200 independent GPU jobs
+```
 
-**HUMAN vs HUMAN** — is the rubric coherent? If you two can't agree with each
-other, the instructions are ambiguous and no model can fix that. Rewrite this
-file, regrade, try again.
+Every job is embarrassingly parallel (no inter-job communication), so throughput
+scales linearly with GPU count.
 
-**HUMAN vs LLM** — can we trust the LLM on the claims nobody checked? This is
-the number that goes in the paper.
+---
 
-If `direction` comes back under 0.6, **stop.** Don't run `score_claims.py`, don't
-retrain anything. Read the `human_notes` on the claims you disagreed about, find
-the ambiguity, sharpen `RUBRIC_PROMPT` in `grade_claims.py`, re-run the LLM, and
-recompute. Building a scoring rubric on labels the coders themselves cannot
-reproduce just launders the disagreement into a number with a decimal point.
+## 4. Stages in detail
 
-Report the final kappas in the paper, per field, with n. Report them even if
-they're mediocre — a stated κ = 0.58 is a limitation, an unstated one is a hole.
+### Stage 0 — Build and stratify the variant panel
+- Sources: **ClinVar**, **ALSoD** (ALS-specific), cross-ref **gnomAD** for frequency.
+- **Numbering caution:** mature SOD1 has the initiator Met removed → 153 residues.
+  Literature variant names (A4V, G93A) use mature numbering. Get the offset right
+  once, centrally, or every downstream mapping breaks.
+- Stratify into four buckets:
+  1. **Positive controls** — experimentally measured ΔΔG / ΔTm (non-negotiable).
+  2. **Negative controls** — common/benign, should not destabilize.
+  3. **Pathogenic-but-uncharacterized** — clinical label, no structural work.
+  4. **VUS** — variants of uncertain significance (the payoff targets).
+- Output: `data/variants.csv` with columns
+  `variant,mature_pos,wt_aa,mut_aa,bucket,exp_ddg,exp_source,clinvar_id`.
+
+### Stage 1 — Prepare structure
+- Start from a high-resolution human SOD1 crystal structure (PDB).
+- **Apo** (see §2.1). Strip metals; model disulfide-reduced Cys57/Cys146.
+- Monomer vs dimer: **dimer** for interface-adjacent variants, **monomer** for
+  buried-core variants — decided per variant, recorded in `variants.csv`.
+- Standard prep: fix missing atoms/loops, assign protonation (PROPKA or H++),
+  solvate, neutralize, add ions.
+- Deliver as a **parameterized script**: `variant_id -> prepared_system`. It runs
+  dozens of times; no manual steps.
+
+### Stage 2 — Cheap empirical prescreen (CPU, runs on everything)
+- **FoldX BuildModel** and/or **Rosetta cartesian_ddg** on ALL variants.
+- Three jobs: first ΔΔG estimate, prioritization ranking, and an independent
+  cross-check against FEP later.
+- Validate these against controls too — if FoldX can't reproduce known cases,
+  you learn it cheaply.
+
+### Stage 3 — Alchemical ΔΔG (the cluster workhorse) ★
+- Thermodynamic cycle: run the alchemical mutation (X→Y) in the **folded protein**
+  and in an **unfolded reference** (solvated capped tripeptide). Difference of the
+  two legs = ΔΔG_folding.
+- Each leg → **12–24 λ-windows**, softcore potentials for appearing/disappearing
+  atoms, **≥3 (ideally 5) replicates** per window with distinct seeds.
+- Replicate discipline is where people cut corners; error bars are mandatory here.
+- **Framework — one of (see [Open decisions](#open-decisions)):**
+  - OpenMM + Perses
+  - GROMACS + pmx
+  - AMBER TI
+- Free-energy estimator: **MBAR**. Check convergence (forward/backward hysteresis,
+  cycle closure).
+
+### Stage 4 — Unbiased MD for mechanism (complementary)
+- FEP gives a number; MD gives the story. Run longer replicate plain-MD on the
+  subset FEP flags as interesting.
+- Analyze: per-residue **RMSF**, contact-map / salt-bridge loss, **SASA** change,
+  dimer-interface integrity, local-unfolding proxies.
+- **Caveat:** do not expect full unfolding in accessible timescales — read proxies
+  and equilibrium shifts, not a complete denaturation event.
+
+### Stage 5 — Validation and interpretation
+- **GATE:** correlate computed FEP ΔΔG vs experimental controls (Pearson/Spearman,
+  low cycle-closure hysteresis). Go/no-go.
+- Cross-check FEP vs FoldX/Rosetta for consistency.
+- Then classify uncharacterized variants; ask whether computed destabilization
+  separates clinically pathogenic from benign labels.
+- Output: `results/ddg_map.csv` + validation plots.
+
+---
+
+## 5. Cluster orchestration
+
+- **Workflow manager:** Snakemake or Nextflow — the DAG
+  (prep → prescreen → FEP windows → analysis) must be reproducible and restartable.
+- **Scheduler:** SLURM **job arrays** — one array task per
+  `(variant, leg, window, replicate)`.
+- **Checkpoint everything** — windows die; never restart from zero.
+- **Trajectory retention policy up front** — full FEP trajectories are large.
+  Keep free-energy estimates + analysis outputs; downsample or discard raw frames.
+
+---
+
+## 6. Proposed repository layout
+
+```
+sod1-fep/
+├── README.md                  # this file
+├── env/
+│   ├── environment.yml        # conda: mdtraj, openmm/gromacs, pymbar, etc.
+│   └── modules.md             # cluster module-load notes
+├── data/
+│   ├── variants.csv           # Stage 0 output (the source of truth)
+│   └── structures/            # prepared PDBs, per variant
+├── config/
+│   ├── pipeline.yaml          # global params: replicates, λ count, sim lengths
+│   └── slurm.yaml             # partitions, GPU counts, walltimes
+├── workflow/
+│   └── Snakefile              # or main.nf
+├── src/
+│   ├── panel/                 # Stage 0: pull + stratify variants
+│   ├── prep/                  # Stage 1: variant_id -> prepared_system
+│   ├── prescreen/             # Stage 2: FoldX / Rosetta wrappers
+│   ├── fep/                   # Stage 3: setup, run, MBAR analysis
+│   ├── md/                    # Stage 4: unbiased MD + analysis
+│   └── analysis/              # Stage 5: validation, plots, classification
+├── scripts/
+│   └── submit_array.sh        # SLURM array submission helper
+├── results/
+│   ├── ddg_map.csv
+│   └── figures/
+└── tests/
+    └── test_numbering.py      # guard the mature-numbering offset
+```
+
+---
+
+## 7. Suggested tech stack
+
+| Concern            | Choice                                              |
+|--------------------|-----------------------------------------------------|
+| Language           | Python 3.11+                                         |
+| MD / FEP engine    | OpenMM+Perses **or** GROMACS+pmx **or** AMBER TI     |
+| Empirical ΔΔG      | FoldX, Rosetta cartesian_ddg                         |
+| Free-energy math   | pymbar (MBAR)                                        |
+| Trajectory analysis| MDTraj / MDAnalysis                                  |
+| Workflow           | Snakemake or Nextflow                                |
+| Scheduler          | SLURM (job arrays)                                   |
+| Structure prep     | PDBFixer, PROPKA/H++                                 |
+
+---
+
+## 8. Milestones
+
+1. **M0** — variant panel built and stratified; numbering test passes.
+2. **M1** — structure-prep script runs end-to-end on one control variant.
+3. **M2** — empirical prescreen over all variants; ranked table produced.
+4. **M3** — FEP runs for the control set; **validation gate** evaluated.
+   *(No further compute until this gate passes.)*
+5. **M4** — FEP extended to uncharacterized variants; ΔΔG map produced.
+6. **M5** — mechanism MD on flagged subset; final report + figures.
+
+---
+
+## 9. Open decisions
+
+An agent should ask the user to resolve these before writing implementation code:
+
+- **FEP framework:** OpenMM+Perses vs GROMACS+pmx vs AMBER TI? (Shapes all of Stage 3
+  and the SLURM array structure.)
+- **GPU count / partition names / walltime limits** on the target cluster? (Sizes the
+  panel and the array chunking.)
+- **Panel size for v1:** how many variants (≈30–50 suggested)?
+- **Monomer vs dimer default**, and the per-variant rule for choosing.
+- **Starting PDB** (which structure, which resolution).
+- **λ-window count (12/18/24)** and **replicate count (3/5)** — cost vs precision.
+- **Alternative target fallback:** if the SOD1 metal chemistry proves troublesome
+  even in apo form, **transthyretin (TTR)** offers the same panel+FEP design with no
+  metals (tetramer stability is the disease-relevant quantity). Keep as a documented
+  Plan B.
+
+---
+
+## 10. References to gather (for the agent to populate)
+
+- SOD1 experimental stability data for the control variants (literature ΔTm/ΔΔG).
+- ClinVar + ALSoD variant exports.
+- Chosen FEP framework's tutorial / protocol paper.
+- pmx or Perses hybrid-topology setup docs.
