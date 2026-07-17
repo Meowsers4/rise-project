@@ -5,13 +5,15 @@ README §4:
 
     variant,mature_pos,wt_aa,mut_aa,bucket,exp_ddg,exp_source,clinvar_id,oligomer
 
-Inputs:
-- ``data/controls_experimental.csv`` -- curated positive controls with experimental
-  ΔΔG (the M3 validation set). Values may be ``NEEDS_VERIFICATION`` until filled from
-  literature; they are passed through verbatim so nothing is fabricated here.
-- (optional) ``data/uncharacterized_variants.csv`` -- ClinVar/ALSoD/gnomAD-derived
-  variants with columns ``variant,bucket,clinvar_id``. Until the external ingestion
-  is implemented (see :func:`ingest_external_variants`), the panel is controls-only.
+Inputs (paths from ``config.panel``):
+- ``panel.controls_csv`` (``data/sod1_controls_apo_monomer.csv``) -- verified apo-monomer
+  positive controls (Kumar2017 Table S1). ``exp_ddg`` is the apo-monomer gate value
+  (positive = destabilizing); ``exp_ddg_dimer`` is a carried cross-check only. Values
+  pass through verbatim -- nothing is fabricated here.
+- (optional) ``panel.uncharacterized_csv`` (``data/uncharacterized_variants.csv``) --
+  Route B input with columns ``variant,bucket,clinvar_id``. Until the external
+  ingestion is implemented (see :func:`ingest_external_variants`) this file is
+  user-supplied; if it has no data rows the panel is controls-only.
 
 Oligomer assignment follows D4:
 - **Controls** are pinned to the oligomeric state their ΔΔG was MEASURED in
@@ -42,17 +44,21 @@ OUTPUT_FIELDS = [
     "wt_aa",
     "mut_aa",
     "bucket",
-    "exp_ddg",
+    "exp_ddg",        # apo-monomer ddG; positive = destabilizing (the gate value)
     "exp_ddg_err",
+    "exp_ddg_dimer",  # dimer cross-check only -- NOT used in the monomer gate
     "exp_source",
     "measured_state",
     "clinvar_id",
     "oligomer",
 ]
 
-# measured_state values that mean the control was characterised as a single subunit.
-_MONOMER_STATES = {"apo_monomer", "apo_reduced", "monomer"}
-_DIMER_STATES = {"apo_dimer", "holo_dimer", "dimer"}
+# Default experimental error (kcal/mol) when a controls row leaves exp_ddg_err blank
+# (Kumar2017 Table S1 stated methodological error).
+_DEFAULT_DDG_ERR = "0.30"
+
+# Buckets permitted for Route B uncharacterized variants.
+_UNCHARACTERIZED_BUCKETS = {"pathogenic_uncharacterized", "vus"}
 
 
 def load_config(config_path: str | Path) -> dict:
@@ -74,68 +80,115 @@ def ensure_structure(cfg: dict) -> Path:
     return dest
 
 
-def _oligomer_for_control(measured_state: str, default: str) -> str:
-    """Pin a control to the oligomeric state it was measured in (D4 caveat)."""
-    state = measured_state.strip().lower()
-    if state in _MONOMER_STATES:
-        return "monomer"
-    if state in _DIMER_STATES:
-        return "dimer"
-    # Unknown/blank measured state -> fall back to config default, do not guess a dimer.
-    return default
+def _parse_and_check(variant: str, entry: dict) -> tuple[str, int, str]:
+    """parse_variant + cross-check against any wt_aa/mature_pos/mut_aa in the row.
 
-
-def _base_row(variant: str) -> dict:
+    Rejects non-missense names (parse_variant raises on ``G127X``/``E134*``/etc.) and
+    catches a variant string that disagrees with its own tabulated columns.
+    """
     wt, pos, mut = parse_variant(variant)
-    return {"variant": variant, "mature_pos": pos, "wt_aa": wt, "mut_aa": mut}
+    for col, want, got in (
+        ("wt_aa", entry.get("wt_aa"), wt),
+        ("mut_aa", entry.get("mut_aa"), mut),
+        ("mature_pos", entry.get("mature_pos"), pos),
+    ):
+        if want not in (None, ""):
+            if str(want).strip() != str(got):
+                raise ValueError(
+                    f"{variant}: column {col}={want!r} disagrees with parsed {got!r}"
+                )
+    return wt, pos, mut
 
 
 def build_control_rows(controls_csv: str | Path, cfg: dict) -> list[dict]:
-    """Rows for the curated experimental controls (oligomer pinned to measured state)."""
-    default_oligomer = cfg["structure"]["default_oligomer"]
+    """Rows for the verified apo-monomer controls.
+
+    Oligomer is pinned to ``monomer`` (measured state), overriding the 5 Å rule (D4).
+    ``exp_ddg`` (apo-monomer, positive=destabilizing) is the gate value; ``exp_ddg_dimer``
+    is carried as a cross-check only. Values pass through verbatim -- no fabrication.
+    """
     rows: list[dict] = []
     with open(controls_csv) as f:
         for entry in csv.DictReader(f):
             variant = entry["variant"].strip()
-            row = _base_row(variant)
-            row.update(
-                bucket=entry.get("bucket", "positive_control") or "positive_control",
-                exp_ddg=entry.get("exp_ddg", ""),
-                exp_ddg_err=entry.get("exp_ddg_err", ""),
-                exp_source=entry.get("exp_source", ""),
-                measured_state=entry.get("measured_state", ""),
-                clinvar_id=entry.get("clinvar_id", ""),
-                oligomer=_oligomer_for_control(
-                    entry.get("measured_state", ""), default_oligomer
-                ),
+            wt, pos, mut = _parse_and_check(variant, entry)
+            file_oligomer = (entry.get("oligomer") or "monomer").strip().lower()
+            if file_oligomer != "monomer":
+                raise ValueError(
+                    f"{variant}: controls are apo-monomer measurements but oligomer="
+                    f"{file_oligomer!r}; refusing to mislabel the pinned state."
+                )
+            rows.append(
+                {
+                    "variant": variant,
+                    "mature_pos": pos,
+                    "wt_aa": wt,
+                    "mut_aa": mut,
+                    "bucket": "positive_control",
+                    "exp_ddg": entry["exp_ddg"].strip(),
+                    "exp_ddg_err": (entry.get("exp_ddg_err") or "").strip() or _DEFAULT_DDG_ERR,
+                    "exp_ddg_dimer": (entry.get("exp_ddg_dimer") or "").strip(),
+                    "exp_source": (entry.get("exp_source") or "").strip(),
+                    "measured_state": "apo_monomer",
+                    "clinvar_id": (entry.get("clinvar_id") or "").strip(),
+                    "oligomer": "monomer",  # pinned; overrides geometry (D4)
+                }
             )
-            rows.append(row)
     return rows
 
 
 def build_uncharacterized_rows(
-    uncharacterized_csv: str | Path, cfg: dict, pdb_path: str | Path
+    uncharacterized_csv: str | Path,
+    cfg: dict,
+    pdb_path: str | Path,
+    control_variants: set[str],
 ) -> list[dict]:
-    """Rows for uncharacterized variants; oligomer via the geometric 5 Å rule (D4)."""
+    """Rows for Route B uncharacterized variants, with constraints enforced loudly.
+
+    Missense-only (via parse_variant), mature numbering in range, bucket in the allowed
+    set, and NO overlap with the controls. Oligomer comes from the geometric 5 Å rule.
+    """
     cutoff = cfg["structure"]["interface_cutoff_A"]
     default_oligomer = cfg["structure"]["default_oligomer"]
+    n_mature = cfg["project"]["n_residues_mature"]
     rows: list[dict] = []
+    seen: set[str] = set()
     with open(uncharacterized_csv) as f:
         for entry in csv.DictReader(f):
             variant = entry["variant"].strip()
-            row = _base_row(variant)
-            row.update(
-                bucket=entry.get("bucket", "vus") or "vus",
-                exp_ddg="",
-                exp_ddg_err="",
-                exp_source="",
-                measured_state="",
-                clinvar_id=entry.get("clinvar_id", ""),
-                oligomer=classify_oligomer(
-                    row["mature_pos"], str(pdb_path), cutoff, default=default_oligomer
-                ),
+            bucket = (entry.get("bucket") or "").strip()
+            if bucket not in _UNCHARACTERIZED_BUCKETS:
+                raise ValueError(
+                    f"{variant}: bucket {bucket!r} not in {sorted(_UNCHARACTERIZED_BUCKETS)}"
+                )
+            wt, pos, mut = _parse_and_check(variant, entry)  # rejects non-missense
+            if not 1 <= pos <= n_mature:
+                raise ValueError(
+                    f"{variant}: mature position {pos} out of range 1..{n_mature}"
+                )
+            if variant in control_variants:
+                raise ValueError(f"{variant}: collides with a control variant (dedupe)")
+            if variant in seen:
+                raise ValueError(f"{variant}: duplicated in {uncharacterized_csv}")
+            seen.add(variant)
+            rows.append(
+                {
+                    "variant": variant,
+                    "mature_pos": pos,
+                    "wt_aa": wt,
+                    "mut_aa": mut,
+                    "bucket": bucket,
+                    "exp_ddg": "",
+                    "exp_ddg_err": "",
+                    "exp_ddg_dimer": "",
+                    "exp_source": "",
+                    "measured_state": "",
+                    "clinvar_id": (entry.get("clinvar_id") or "").strip(),
+                    "oligomer": classify_oligomer(
+                        pos, str(pdb_path), cutoff, default=default_oligomer
+                    ),
+                }
             )
-            rows.append(row)
     return rows
 
 
@@ -152,14 +205,35 @@ def ingest_external_variants(cfg: dict) -> Path:
     )
 
 
-def build_panel(cfg: dict, controls_csv: str | Path, out_path: str | Path) -> list[dict]:
-    """Assemble the panel (controls + any uncharacterized) and write ``variants.csv``."""
-    pdb_path = ensure_structure(cfg)
-    rows = build_control_rows(controls_csv, cfg)
+def _validate_gate_subset(control_variants: set[str], cfg: dict) -> None:
+    """Every M3 gate-subset variant must be a control, or the gate is undefined."""
+    subset = cfg.get("validation", {}).get("gate_subset") or []
+    missing = [v for v in subset if v not in control_variants]
+    if missing:
+        raise ValueError(
+            f"validation.gate_subset variants not in controls: {missing}"
+        )
 
-    uncharacterized_csv = ROOT / "data" / "uncharacterized_variants.csv"
+
+def build_panel(cfg: dict, out_path: str | Path) -> list[dict]:
+    """Assemble the panel (controls + any uncharacterized) and write ``variants.csv``.
+
+    Input paths come from ``config.panel`` (``controls_csv``, ``uncharacterized_csv``).
+    The uncharacterized file is optional; if it has no data rows the panel is controls
+    only. Uncharacterized variants are deduped against the controls.
+    """
+    pdb_path = ensure_structure(cfg)
+
+    controls_csv = ROOT / cfg["panel"]["controls_csv"]
+    rows = build_control_rows(controls_csv, cfg)
+    control_variants = {r["variant"] for r in rows}
+    _validate_gate_subset(control_variants, cfg)
+
+    uncharacterized_csv = ROOT / cfg["panel"]["uncharacterized_csv"]
     if uncharacterized_csv.exists():
-        rows += build_uncharacterized_rows(uncharacterized_csv, cfg, pdb_path)
+        rows += build_uncharacterized_rows(
+            uncharacterized_csv, cfg, pdb_path, control_variants
+        )
 
     _check_controls_floor(rows, cfg)
 
@@ -188,14 +262,19 @@ def _check_controls_floor(rows: list[dict], cfg: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the SOD1 variant panel (Stage 0).")
     parser.add_argument("--config", default=str(ROOT / "config" / "pipeline.yaml"))
-    parser.add_argument("--controls", default=str(ROOT / "data" / "controls_experimental.csv"))
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    rows = build_panel(cfg, args.controls, args.out)
+    rows = build_panel(cfg, args.out)
     n_controls = sum(1 for r in rows if r["bucket"] == "positive_control")
-    print(f"Wrote {len(rows)} variants ({n_controls} positive controls) -> {args.out}")
+    n_unchar = len(rows) - n_controls
+    olig = {}
+    for r in rows:
+        olig[r["oligomer"]] = olig.get(r["oligomer"], 0) + 1
+    print(f"Wrote {len(rows)} variants -> {args.out}")
+    print(f"  controls: {n_controls}  uncharacterized: {n_unchar}")
+    print(f"  oligomer: {dict(sorted(olig.items()))}")
 
 
 if __name__ == "__main__":

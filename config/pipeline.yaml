@@ -23,7 +23,9 @@ structure:
   ion_conc_M: 0.15
 
 panel:
-  csv: data/variants.csv
+  csv: data/variants.csv                            # Stage 0 output (source of truth)
+  controls_csv: data/sod1_controls_apo_monomer.csv  # verified apo-monomer controls (Kumar2017 Table S1)
+  uncharacterized_csv: data/uncharacterized_variants.csv  # Route B input (variant,bucket,clinvar_id)
   target_size: 40           # v1 panel size (README suggests 30-50)
   min_positive_controls: 10 # gate power depends on control count+spread (D3); quality over count
   require_controls: true    # fail fast if no positive controls present
@@ -69,7 +71,15 @@ md:                         # Stage 4 — unbiased mechanism MD (GPU, subset)
 validation:                 # Stage 5 — the GATE (README §2.2)
   gate_on: positive_control
   min_pearson: 0.6          # go/no-go threshold vs experimental ddG
+  ddg_sign: positive_destabilizing  # exp_ddg AND FEP ddG: positive = destabilizing.
+                                     # src/fep must emit this sign so gate Pearson is positive.
+  ddg_gate_column: exp_ddg  # apo-MONOMER ddG is the gate value; exp_ddg_dimer is a
+                            # carried cross-check only and is NOT used in the gate.
   cross_check: [foldx, rosetta_cartesian_ddg]
+  # M3 validates on this ~12-variant subset (spans the ddG range) BEFORE scaling to
+  # the full 54 controls. Every entry must exist in the controls (build.py enforces).
+  gate_subset:
+    [G93V, G93D, G93R, G93A, A4V, I113T, D90A, V81A, N139K, D101N, H46R, F64A]
   outputs:
     ddg_map: results/ddg_map.csv
     figures: results/figures/
