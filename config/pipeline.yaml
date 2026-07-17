@@ -44,6 +44,9 @@ prescreen:                  # Stage 2 — cheap empirical ddG (CPU)
     - rosetta_cartesian_ddg
   runs_per_variant: 5       # FoldX BuildModel averaging
   validate_on_controls: true
+  rosetta_reu_per_kcal: 2.94   # divide Rosetta cartesian ddG (REU) by this -> kcal/mol
+  min_pearson_controls: 0.5    # advisory: warn if prescreen-vs-experiment r on controls is below this
+  # Both methods report positive = destabilizing, matching validation.ddg_sign.
 
 fep:                        # Stage 3 — the cluster workhorse (GPU)
   framework: openmm_perses  # openmm_perses | gromacs_pmx | amber_ti  (resolved: OpenMM+Perses)
