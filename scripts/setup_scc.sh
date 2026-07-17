@@ -7,13 +7,22 @@
 #   qrsh -l gpus=1 -l gpu_c=7.0          # grab a GPU, then:
 #   bash scripts/setup_scc.sh --gpu      # OpenMM GPU/platform check
 #
-# Override module/conda locations for your SCC if the defaults are wrong:
-#   CONDA_MODULE=miniconda CUDA_MODULE=cuda CONDA_BASE=$HOME/miniconda3 SOD1_ENV=sod1-fep
+# Module names default from config (cluster.conda_module / cluster.cuda_module).
+# Override for a different SCC if needed:
+#   CONDA_MODULE=miniconda/25.3.1 CUDA_MODULE=cuda/12.8 SOD1_ENV=sod1-fep
 set -euo pipefail
 
-CONDA_MODULE="${CONDA_MODULE:-miniconda}"
-CUDA_MODULE="${CUDA_MODULE:-cuda}"
+CONFIG="config/pipeline.yaml"
+# Read a cluster.<key> from config without needing python/yaml (pre-env bootstrap).
+cfg_get() { grep -E "^[[:space:]]*$1:" "${CONFIG}" | head -1 | sed -E 's/^[^:]+:[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"//; s/"$//'; }
+
+# Precedence: env-var override > config value.
+CONDA_MODULE="${CONDA_MODULE:-$(cfg_get conda_module)}"
+CUDA_MODULE="${CUDA_MODULE:-$(cfg_get cuda_module)}"
 SOD1_ENV="${SOD1_ENV:-sod1-fep}"
+
+: "${CONDA_MODULE:?set cluster.conda_module in ${CONFIG} or CONDA_MODULE}"
+: "${CUDA_MODULE:?set cluster.cuda_module in ${CONFIG} or CUDA_MODULE}"
 
 echo "== module load =="
 module load "${CONDA_MODULE}" || echo "WARN: 'module load ${CONDA_MODULE}' failed -- set CONDA_MODULE"

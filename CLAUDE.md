@@ -43,6 +43,9 @@ Ask these interactively; do not pick defaults and proceed.
   `(variant, leg, window, replicate)`. Keep that granularity — it's the whole point.
 - GPUs are requested via `-l gpus=1 -l gpu_c=7.0` and assigned by the scheduler
   through `CUDA_VISIBLE_DEVICES`; never hardcode device IDs (one window = one GPU).
+- SCC modules are versioned (no bare names): `miniconda/25.3.1`, `cuda/12.8` (stay on
+  the 12.x line for OpenMM). These live in `config/pipeline.yaml:cluster.{conda,cuda}_module`;
+  scripts read them from there (env-var override allowed).
 - Checkpoint long GPU jobs; assume windows will die and must resume.
 - Honor `cluster.trajectory_retention` — do not persist raw frames when the config
   says estimates only (disk fills fast).

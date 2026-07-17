@@ -97,6 +97,8 @@ validation:                 # Stage 5 — the GATE (README §2.2)
 cluster:
   scheduler: sge                 # BU SCC runs Open Grid Scheduler (SGE/OGS), NOT SLURM
   project: rise-batteries        # SGE -P flag
+  conda_module: "miniconda/25.3.1"  # SCC modules are versioned (no bare `miniconda`)
+  cuda_module: "cuda/12.8"          # stay on 12.x for OpenMM CUDA-build compatibility (not 13.x)
   gpu_c: "7.0"                   # request GPUs by compute capability >=7.0, not by model name
   gpus_available: 8              # planning/throughput number ONLY -- not requested in a single qsub
   pe_omp: 8                      # -pe omp slots (CPU cores per task)

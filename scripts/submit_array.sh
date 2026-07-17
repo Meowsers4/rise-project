@@ -34,6 +34,20 @@ set -euo pipefail
 
 CONFIG="config/pipeline.yaml"
 
+# ---- activate the conda env FIRST so python/yaml exist for the reads below --------
+# Module names come from config (cluster.conda_module / cluster.cuda_module); override
+# with env vars for a different SCC. Read via grep to avoid needing python pre-activate.
+# Pass FEP_MOCK=1 (e.g. `qsub -v VARIANT=A4V,FEP_MOCK=1 ...`) for a scheduler shake-out
+# that runs the synthetic window instead of the (GPU-only) Perses window.
+cfg_get() { grep -E "^[[:space:]]*$1:" "${CONFIG}" | head -1 | sed -E 's/^[^:]+:[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"//; s/"$//'; }
+CONDA_MODULE="${CONDA_MODULE:-$(cfg_get conda_module)}"
+CUDA_MODULE="${CUDA_MODULE:-$(cfg_get cuda_module)}"
+[[ -n "${CONDA_MODULE}" ]] && module load "${CONDA_MODULE}"
+[[ -n "${CUDA_MODULE}" ]] && module load "${CUDA_MODULE}"
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "${SOD1_ENV:-sod1-fep}"
+echo "host=$(hostname) CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>} mock=${FEP_MOCK:-0}"
+
 # ---- read fan-out geometry from config (no hardcoded params; CLAUDE.md rule 4) --
 read_fep() { python -c "import yaml,sys; print(yaml.safe_load(open('${CONFIG}'))['fep'][sys.argv[1]])" "$1"; }
 N_WINDOWS=$(read_fep lambda_windows)
@@ -56,15 +70,6 @@ leg_i=$(( idx / (N_REPS * N_WINDOWS) ))
 leg="${LEGS[$leg_i]}"
 
 echo "task ${SGE_TASK_ID}: variant=${VARIANT} leg=${leg} window=${win} rep=${rep}"
-
-# ---- activate the conda env (override via env vars for your SCC; see env/modules.md) --
-# Pass FEP_MOCK=1 (e.g. `qsub -v VARIANT=A4V,FEP_MOCK=1 ...`) for a scheduler shake-out
-# that runs the synthetic window instead of the (GPU-only) Perses window.
-[[ -n "${CUDA_MODULE:-}" ]] && module load "${CUDA_MODULE}"
-source "${CONDA_BASE:-$HOME/miniconda3}/etc/profile.d/conda.sh"
-conda activate "${SOD1_ENV:-sod1-fep}"
-
-echo "host=$(hostname) CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>} mock=${FEP_MOCK:-0}"
 
 python -m src.fep.window \
     --variant "${VARIANT}" \
