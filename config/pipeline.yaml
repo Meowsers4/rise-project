@@ -57,10 +57,11 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
     - unfolded              # mutation in capped tripeptide reference
   softcore: true
   estimator: mbar
+  temperature_K: 298.15     # reduced potentials -> kcal/mol conversion (kT)
   ns_per_window: 5          # production time per lambda window
   equilibration_ns: 1
   convergence:
-    max_cycle_closure_kcal: 1.0   # flag if thermodynamic cycle doesn't close
+    max_cycle_closure_kcal: 1.0   # flag if fwd/reverse hysteresis exceeds this (kcal/mol)
     check_hysteresis: true
 
 md:                         # Stage 4 — unbiased mechanism MD (GPU, subset)
