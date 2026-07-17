@@ -86,8 +86,11 @@ validation:                 # Stage 5 — the GATE (README §2.2)
   # the full 54 controls. Every entry must exist in the controls (build.py enforces).
   gate_subset:
     [G93V, G93D, G93R, G93A, A4V, I113T, D90A, V81A, N139K, D101N, H46R, F64A]
+  min_gate_points: 6            # require >= this many gate_subset variants (FEP + exp) to judge
+  destabilizing_ddg_kcal: 1.0   # classify a variant destabilizing if FEP ddG > this (kcal/mol)
   outputs:
-    ddg_map: results/ddg_map.csv
+    ddg_map: results/ddg_map.csv       # written ONLY if the gate passes
+    gate_report: results/validation_gate.json  # always written (control correlation is presentable)
     figures: results/figures/
 
 cluster:
