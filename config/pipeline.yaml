@@ -21,6 +21,9 @@ structure:
   water_model: tip3p
   ff_protein: amber14sb     # or charmm36m if using GROMACS+CHARMM
   ion_conc_M: 0.15
+  ph: 7.0                   # Stage 1 protonation pH (PDBFixer addMissingHydrogens)
+  solvent_padding_nm: 1.0   # min solute-box padding for Modeller.addSolvent
+  rebuild_missing_loops: true  # 3ECU has disordered metal-binding loops (D5) -> rebuild
 
 panel:
   csv: data/variants.csv                            # Stage 0 output (source of truth)
