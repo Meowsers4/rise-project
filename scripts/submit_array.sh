@@ -57,7 +57,15 @@ leg="${LEGS[$leg_i]}"
 
 echo "task ${SGE_TASK_ID}: variant=${VARIANT} leg=${leg} window=${win} rep=${rep}"
 
-# Cluster module loads / conda activation happen here (see env/modules.md).
+# ---- activate the conda env (override via env vars for your SCC; see env/modules.md) --
+# Pass FEP_MOCK=1 (e.g. `qsub -v VARIANT=A4V,FEP_MOCK=1 ...`) for a scheduler shake-out
+# that runs the synthetic window instead of the (GPU-only) Perses window.
+[[ -n "${CUDA_MODULE:-}" ]] && module load "${CUDA_MODULE}"
+source "${CONDA_BASE:-$HOME/miniconda3}/etc/profile.d/conda.sh"
+conda activate "${SOD1_ENV:-sod1-fep}"
+
+echo "host=$(hostname) CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>} mock=${FEP_MOCK:-0}"
+
 python -m src.fep.window \
     --variant "${VARIANT}" \
     --leg "${leg}" \
