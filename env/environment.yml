@@ -26,7 +26,9 @@ dependencies:
   - scipy
   - pandas
   - pyyaml
-  - snakemake-minimal
   # --- dev / test ---
   - pytest
   - pip
+# NOTE: snakemake is NOT here. The FEP run uses direct SGE qsub arrays
+# (scripts/submit_array.sh), so the compute env doesn't need it, and it bloats the
+# solve. If you want DAG orchestration, install snakemake in a separate login-node env.
