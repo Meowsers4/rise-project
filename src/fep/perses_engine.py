@@ -17,9 +17,11 @@ Everything numeric is read from ``config/pipeline.yaml`` (CLAUDE.md #4). This mo
 run without a GPU + the SCC ``sod1-fep`` env (openmmtools/perses), so imports of those are
 lazy and the pure/guard logic stays importable for tests.
 
-NOTE (perses API): kwarg names on ``PointMutationExecutor`` and the alchemical-state helpers
-have drifted across perses releases. This targets perses 0.10.x; if the SCC smoke-test raises
-a TypeError on a kwarg, that constructor call is the place to adjust -- the surrounding
+NOTE (perses API): the high-level ``PointMutationExecutor`` imports OpenEye (licensed; absent
+on the SCC), so :func:`_build_htf` drives the OpenEye-free lower-level engine instead
+(``PointMutationEngine`` -> ``FFAllAngleGeometryEngine`` -> ``HybridTopologyFactory``). Those
+kwarg names have drifted across perses releases; this targets 0.10.x, and if a smoke-test
+raises a TypeError on a kwarg, those constructors are the place to reconcile -- the surrounding
 sampling/MBAR logic is engine-stable.
 """
 
@@ -121,42 +123,86 @@ def _input_structure(cfg: dict, variant: str, leg: str) -> Path:
 
 
 def _build_htf(cfg: dict, variant: str, leg: str):
-    """Build the WT->mut hybrid topology factory for this (variant, leg) via Perses."""
+    """Build the WT->mut hybrid topology factory via Perses' OpenEye-FREE lower-level API.
+
+    The high-level ``PointMutationExecutor`` imports OpenEye (licensed; absent on the SCC), so
+    we drive the engine directly: solvate the WT with OpenMM's amber14 ForceField (same FF as
+    prep), ``PointMutationEngine`` proposes the residue swap, ``FFAllAngleGeometryEngine`` places
+    the new atoms, and ``HybridTopologyFactory`` builds the alchemical system. No OpenEye needed.
+    """
     from openmm import app, unit
-    from perses.app.relative_point_mutation_setup import PointMutationExecutor
+    from openmmforcefields.generators import SystemGenerator
+    from openmmtools.constants import kB
+    from perses.annihilation.relative import HybridTopologyFactory
+    from perses.rjmc.geometry import FFAllAngleGeometryEngine
+    from perses.rjmc.topology_proposal import PointMutationEngine
 
     record = load_variant_record(ROOT / cfg["panel"]["csv"], variant)
     scfg, fcfg = cfg["structure"], cfg["fep"]
-    pdb = _input_structure(cfg, variant, leg)
+    pdb_path = _input_structure(cfg, variant, leg)
+    T = float(fcfg["temperature_K"]) * unit.kelvin
 
     constraints = {"HBonds": app.HBonds, "AllBonds": app.AllBonds, "None": None}[fcfg["constraints"]]
-    ff_kwargs = {
-        "removeCMMotion": False,
-        "constraints": constraints,
-        "rigidWater": True,
-        "hydrogenMass": (float(fcfg["hydrogen_mass_amu"]) * unit.amu)
-        if fcfg.get("hydrogen_mass_amu") else None,
-    }
+    ff_kwargs = {"removeCMMotion": False, "constraints": constraints, "rigidWater": True}
+    if fcfg.get("hydrogen_mass_amu"):
+        ff_kwargs["hydrogenMass"] = float(fcfg["hydrogen_mass_amu"]) * unit.amu
     periodic_ff_kwargs = {
         "nonbondedMethod": {"PME": app.PME}[fcfg["nonbonded_method"]],
         "nonbondedCutoff": float(fcfg["nonbonded_cutoff_nm"]) * unit.nanometer,
     }
-
-    pm = PointMutationExecutor(
-        protein_filename=str(pdb),
-        mutation_chain_id="A",                       # monomer ref chain (guarded above)
-        mutation_residue_id=str(record["mature_pos"]),
-        proposed_residue=_THREE[record["mut_aa"]],
-        forcefield_files=_forcefield_files(cfg),
-        water_model=scfg["water_model"],
-        ionic_strength=float(scfg["ion_conc_M"]) * unit.molar,
-        solvent_padding=float(scfg["solvent_padding_nm"]) * unit.nanometer,
-        temperature=float(fcfg["temperature_K"]) * unit.kelvin,
+    # Barostat is NOT added here: openmmtools ThermodynamicState adds it per-state for NPT
+    # (see _compound_states), avoiding a double-barostat on the hybrid system.
+    system_generator = SystemGenerator(
+        forcefields=_forcefield_files(cfg),
         forcefield_kwargs=ff_kwargs,
         periodic_forcefield_kwargs=periodic_ff_kwargs,
-        conduct_endstate_validation=False,
+        small_molecule_forcefield="gaff-2.11",   # unused (no ligands); SystemGenerator requires one
     )
-    return pm.get_apo_htf()  # apo phase = solvated (protein or tripeptide), no ligand
+
+    # --- solvate the WT apo protein / tripeptide with the same amber14 FF ---
+    pdb = app.PDBFile(str(pdb_path))
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.addSolvent(
+        system_generator.forcefield,
+        model=scfg["water_model"],
+        padding=float(scfg["solvent_padding_nm"]) * unit.nanometer,
+        ionicStrength=float(scfg["ion_conc_M"]) * unit.molar,
+        neutralize=True,
+    )
+    wt_topology = modeller.getTopology()
+    wt_positions = modeller.getPositions()
+    wt_system = system_generator.create_system(wt_topology)
+
+    # --- propose the single point mutation on the ref chain (monomer; guarded above) ---
+    # NOTE (perses API): PointMutationEngine kwarg names have drifted across releases; if the
+    # smoke-test raises a TypeError here, this constructor is the place to reconcile with 0.10.3.
+    resid = str(record["mature_pos"])
+    engine = PointMutationEngine(
+        wildtype_topology=wt_topology,
+        system_generator=system_generator,
+        chain_id="A",
+        max_point_mutants=1,
+        residues_allowed_to_mutate=[resid],
+        allowed_mutations=[(resid, _THREE[record["mut_aa"]])],
+        always_change=True,
+    )
+    topology_proposal = engine.propose(wt_system, wt_topology)
+
+    # --- place coordinates for the newly introduced atoms ---
+    beta = 1.0 / (kB * T)
+    geometry_engine = FFAllAngleGeometryEngine(
+        metadata=None, use_sterics=False, n_bond_divisions=100, n_angle_divisions=180,
+        n_torsion_divisions=360, verbose=False, storage=None, neglect_angles=False,
+        use_14_nonbondeds=True,
+    )
+    new_positions, _ = geometry_engine.propose(topology_proposal, wt_positions, beta)
+
+    return HybridTopologyFactory(
+        topology_proposal=topology_proposal,
+        current_positions=wt_positions,
+        new_positions=new_positions,
+        use_dispersion_correction=False,
+    )
 
 
 def _compound_states(cfg: dict, hybrid_system):
