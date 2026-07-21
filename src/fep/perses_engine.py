@@ -27,6 +27,9 @@ sampling/MBAR logic is engine-stable.
 
 from __future__ import annotations
 
+import contextlib
+import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +37,24 @@ import numpy as np
 from src.prep.build import load_variant_record
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _log(msg: str) -> None:
+    """Progress to stderr -- survives on the SGE task log even if the job is killed."""
+    print(f"[perses_engine] {msg}", file=sys.stderr, flush=True)
+
+
+@contextlib.contextmanager
+def _stage(name: str):
+    """Bracket a pipeline stage so any failure names exactly where it died."""
+    _log(f"-> {name}")
+    t0 = time.time()
+    try:
+        yield
+    except Exception as e:  # annotate with the stage, then re-raise the original traceback
+        _log(f"!! FAILED during [{name}]: {type(e).__name__}: {e}")
+        raise
+    _log(f"   done [{name}] ({time.time() - t0:.1f}s)")
 
 # config value -> OpenMM forcefield xml. Explicit map so an unknown value fails loudly
 # (CLAUDE.md #4) instead of silently defaulting to the wrong force field.
@@ -152,57 +173,67 @@ def _build_htf(cfg: dict, variant: str, leg: str):
     }
     # Barostat is NOT added here: openmmtools ThermodynamicState adds it per-state for NPT
     # (see _compound_states), avoiding a double-barostat on the hybrid system.
-    system_generator = SystemGenerator(
-        forcefields=_forcefield_files(cfg),
-        forcefield_kwargs=ff_kwargs,
-        periodic_forcefield_kwargs=periodic_ff_kwargs,
-        small_molecule_forcefield="gaff-2.11",   # unused (no ligands); SystemGenerator requires one
-    )
+    with _stage("system generator (openmmforcefields)"):
+        system_generator = SystemGenerator(
+            forcefields=_forcefield_files(cfg),
+            forcefield_kwargs=ff_kwargs,
+            periodic_forcefield_kwargs=periodic_ff_kwargs,
+            small_molecule_forcefield="gaff-2.11",  # unused (no ligands); SystemGenerator requires one
+        )
 
     # --- solvate the WT apo protein / tripeptide with the same amber14 FF ---
-    pdb = app.PDBFile(str(pdb_path))
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.addSolvent(
-        system_generator.forcefield,
-        model=scfg["water_model"],
-        padding=float(scfg["solvent_padding_nm"]) * unit.nanometer,
-        ionicStrength=float(scfg["ion_conc_M"]) * unit.molar,
-        neutralize=True,
-    )
-    wt_topology = modeller.getTopology()
-    wt_positions = modeller.getPositions()
-    wt_system = system_generator.create_system(wt_topology)
+    with _stage(f"solvate WT ({pdb_path.name})"):
+        pdb = app.PDBFile(str(pdb_path))
+        modeller = app.Modeller(pdb.topology, pdb.positions)
+        modeller.addSolvent(
+            system_generator.forcefield,
+            model=scfg["water_model"],
+            padding=float(scfg["solvent_padding_nm"]) * unit.nanometer,
+            ionicStrength=float(scfg["ion_conc_M"]) * unit.molar,
+            neutralize=True,
+        )
+        wt_topology = modeller.getTopology()
+        wt_positions = modeller.getPositions()
+        wt_system = system_generator.create_system(wt_topology)
+        _log(f"   solvated system: {wt_system.getNumParticles()} particles")
 
     # --- propose the single point mutation on the ref chain (monomer; guarded above) ---
-    # NOTE (perses API): PointMutationEngine kwarg names have drifted across releases; if the
+    # NOTE (perses API): PointMutationEngine kwarg names have drifted across releases; if a
     # smoke-test raises a TypeError here, this constructor is the place to reconcile with 0.10.3.
     resid = str(record["mature_pos"])
-    engine = PointMutationEngine(
-        wildtype_topology=wt_topology,
-        system_generator=system_generator,
-        chain_id="A",
-        max_point_mutants=1,
-        residues_allowed_to_mutate=[resid],
-        allowed_mutations=[(resid, _THREE[record["mut_aa"]])],
-        always_change=True,
-    )
-    topology_proposal = engine.propose(wt_system, wt_topology)
+    with _stage(f"propose mutation {record['wt_aa']}{resid}{record['mut_aa']}"):
+        engine = PointMutationEngine(
+            wildtype_topology=wt_topology,
+            system_generator=system_generator,
+            chain_id="A",
+            max_point_mutants=1,
+            residues_allowed_to_mutate=[resid],
+            allowed_mutations=[(resid, _THREE[record["mut_aa"]])],
+            always_change=True,
+        )
+        topology_proposal = engine.propose(wt_system, wt_topology)
 
     # --- place coordinates for the newly introduced atoms ---
-    beta = 1.0 / (kB * T)
-    geometry_engine = FFAllAngleGeometryEngine(
-        metadata=None, use_sterics=False, n_bond_divisions=100, n_angle_divisions=180,
-        n_torsion_divisions=360, verbose=False, storage=None, neglect_angles=False,
-        use_14_nonbondeds=True,
-    )
-    new_positions, _ = geometry_engine.propose(topology_proposal, wt_positions, beta)
+    with _stage("geometry proposal (new-atom coordinates)"):
+        beta = 1.0 / (kB * T)
+        geometry_engine = FFAllAngleGeometryEngine(
+            metadata=None, use_sterics=False, n_bond_divisions=100, n_angle_divisions=180,
+            n_torsion_divisions=360, verbose=False, storage=None, neglect_angles=False,
+            use_14_nonbondeds=True,
+        )
+        proposed = geometry_engine.propose(topology_proposal, wt_positions, beta)
+        # perses returns (new_positions, logp) in 0.10.x; be tolerant of shape drift.
+        new_positions = proposed[0] if isinstance(proposed, (tuple, list)) else proposed
 
-    return HybridTopologyFactory(
-        topology_proposal=topology_proposal,
-        current_positions=wt_positions,
-        new_positions=new_positions,
-        use_dispersion_correction=False,
-    )
+    with _stage("hybrid topology factory"):
+        htf = HybridTopologyFactory(
+            topology_proposal=topology_proposal,
+            current_positions=wt_positions,
+            new_positions=new_positions,
+            use_dispersion_correction=False,
+        )
+        _log(f"   hybrid system: {htf.hybrid_system.getNumParticles()} particles")
+    return htf
 
 
 def _compound_states(cfg: dict, hybrid_system):
@@ -244,44 +275,64 @@ def run_perses_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     geom = _window_geometry(cfg, smoke)
     dt = geom["dt_fs"] * unit.femtosecond
 
-    htf = _build_htf(cfg, variant, leg)
-    states = _compound_states(cfg, htf.hybrid_system)
-    sampler_state = SamplerState(
-        positions=htf.hybrid_positions,
-        box_vectors=htf.hybrid_system.getDefaultPeriodicBoxVectors(),
-    )
+    _log(f"window start: {variant}/{leg} w{window} r{rep} "
+         f"smoke={smoke} n_states={n_states} geom={geom}")
+
+    with _stage(f"build hybrid topology ({leg})"):
+        htf = _build_htf(cfg, variant, leg)
+    with _stage("build lambda states"):
+        states = _compound_states(cfg, htf.hybrid_system)
+        sampler_state = SamplerState(
+            positions=htf.hybrid_positions,
+            box_vectors=htf.hybrid_system.getDefaultPeriodicBoxVectors(),
+        )
 
     # dynamics context pinned at THIS window's state, on the scheduler-assigned GPU
     # (CUDA_VISIBLE_DEVICES already masks the device -- never set DeviceIndex, CLAUDE.md).
-    platform = Platform.getPlatformByName("CUDA")
-    integrator = LangevinMiddleIntegrator(T, friction, dt)
-    context = states[window].create_context(integrator, platform)
-    sampler_state.apply_to_context(context)
+    with _stage(f"create CUDA context @ lambda[{window}]={_lambda_value(window, n_states):.3f}"):
+        platform = Platform.getPlatformByName("CUDA")
+        integrator = LangevinMiddleIntegrator(T, friction, dt)
+        context = states[window].create_context(integrator, platform)
+        sampler_state.apply_to_context(context)
     if fcfg.get("minimize", True):
-        LocalEnergyMinimizer.minimize(context)
+        with _stage("minimize"):
+            LocalEnergyMinimizer.minimize(context)
     context.setVelocitiesToTemperature(T)
 
     ckpt = ROOT / "results" / "fep" / variant / leg / f"w{window}_r{rep}.ckpt.npz"
     u_kn = np.zeros((n_states, geom["frames"]))
     start_frame = 0
     if ckpt.exists() and not smoke:                       # resume a killed window
-        start_frame, u_kn, sampler_state = _load_checkpoint(ckpt, u_kn, sampler_state, context)
+        with _stage(f"resume from checkpoint {ckpt.name}"):
+            start_frame, u_kn, sampler_state = _load_checkpoint(ckpt, u_kn, sampler_state, context)
 
     if start_frame == 0:
-        integrator.step(geom["equil_steps"])
+        with _stage(f"equilibrate ({geom['equil_steps']} steps)"):
+            integrator.step(geom["equil_steps"])
 
     ckpt_every = _frames_between_checkpoints(cfg, geom)
-    for n in range(start_frame, geom["frames"]):
-        integrator.step(geom["steps_per_frame"])
-        sampler_state.update_from_context(context)
-        for l in range(n_states):                          # cross-evaluate at all states
-            states[l].apply_to_context(context)
-            u_kn[l, n] = states[l].reduced_potential(context)
-        states[window].apply_to_context(context)           # restore dynamics state
-        if not smoke and (n + 1) % ckpt_every == 0:
-            _save_checkpoint(ckpt, n + 1, u_kn, sampler_state)
+    with _stage(f"production sampling ({geom['frames'] - start_frame} frames "
+                f"x {geom['steps_per_frame']} steps)"):
+        for n in range(start_frame, geom["frames"]):
+            integrator.step(geom["steps_per_frame"])
+            sampler_state.update_from_context(context)
+            for l in range(n_states):                      # cross-evaluate at all states
+                states[l].apply_to_context(context)
+                u_kn[l, n] = states[l].reduced_potential(context)
+            states[window].apply_to_context(context)       # restore dynamics state
+            if not smoke and (n + 1) % ckpt_every == 0:
+                _save_checkpoint(ckpt, n + 1, u_kn, sampler_state)
+
+    # never hand MBAR a corrupt window: NaN/inf energy => an unstable system, not a result.
+    if not np.all(np.isfinite(u_kn)):
+        bad = int((~np.isfinite(u_kn)).sum())
+        raise FloatingPointError(
+            f"{variant}/{leg} w{window} r{rep}: {bad} non-finite reduced potentials "
+            "(blown-up dynamics / bad geometry). Not writing a result."
+        )
 
     ckpt.unlink(missing_ok=True)
+    _log(f"window done: {variant}/{leg} w{window} r{rep} u_kn{u_kn.shape} finite")
     return {"lambda_index": window, "n_states": n_states, "u_kn_window": u_kn}
 
 
