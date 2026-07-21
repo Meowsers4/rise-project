@@ -60,6 +60,23 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   temperature_K: 298.15     # reduced potentials -> kcal/mol conversion (kT)
   ns_per_window: 5          # production time per lambda window
   equilibration_ns: 1
+  # --- real Perses window: integrator / ensemble / alchemy (read by src/fep/window.py) ---
+  # Solvation reuses structure.solvent_padding_nm + structure.ion_conc_M (Perses solvates the
+  # WT hybrid). Force field reuses structure.ff_protein + structure.water_model.
+  timestep_fs: 4.0             # 4 fs REQUIRES hydrogen_mass_amu + constraints: HBonds; set 2.0 to disable HMR
+  hydrogen_mass_amu: 3.0       # hydrogen-mass repartitioning target mass (null/0 -> disable HMR)
+  constraints: HBonds          # HBonds | AllBonds | None  (HBonds required for 4 fs)
+  collision_rate_per_ps: 1.0   # Langevin friction / thermostat coupling
+  ensemble: NPT                # NPT (MonteCarloBarostat) | NVT
+  pressure_atm: 1.0            # NPT only
+  barostat_interval: 25        # steps between barostat MC moves (NPT only)
+  nonbonded_method: PME
+  nonbonded_cutoff_nm: 1.0
+  minimize: true               # energy-minimize each window before equilibration
+  frames_per_window: 250       # samples collected per window = n_samples (5 ns / 20 ps save interval)
+  lambda_protocol: default     # Perses LambdaProtocol name (resolved: validated default schedule)
+  unfolded_reference: tripeptide_native  # ACE-[i-1][i][i+1]-NME, neighbors from the WT structure
+  checkpoint_interval_steps: 50000       # write resumable checkpoint every N production steps (CLAUDE.md)
   convergence:
     max_cycle_closure_kcal: 1.0   # flag if fwd/reverse hysteresis exceeds this (kcal/mol)
     check_hysteresis: true
