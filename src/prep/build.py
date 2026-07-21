@@ -76,8 +76,16 @@ def _trim_terminal_missing(fixer) -> None:
             del fixer.missingResidues[key]
 
 
-def prepare_variant(cfg: dict, variant: str, out_path: str | Path) -> Path:
-    """Build the apo, reduced, solvated system for ``variant`` and write it to PDB."""
+def prepare_variant(cfg: dict, variant: str, out_path: str | Path,
+                    apply_mutation: bool = True, solvate: bool = True) -> Path:
+    """Build the apo, reduced system for ``variant`` and write it to PDB.
+
+    Defaults (``apply_mutation=True, solvate=True``) produce the solvated MUTANT used
+    by the FoldX/Rosetta prescreen (Stage 2). For the Perses FEP folded leg pass
+    ``apply_mutation=False, solvate=False``: Perses needs the **WT** apo/reduced protein
+    UNSOLVATED and builds the WT->mut hybrid + solvent itself (see
+    :func:`prepare_wt_apo` and ``src/fep/window.py``).
+    """
     # Imports are local so the pure helpers above (and their tests) don't need OpenMM.
     from openmm import unit
     from openmm.app import ForceField, Modeller, PDBFile
@@ -102,9 +110,11 @@ def prepare_variant(cfg: dict, variant: str, out_path: str | Path) -> Path:
     remove = [i for i, cid in enumerate(all_chain_ids) if cid not in keep]
     fixer.removeChains(remove)
 
-    # mutate every kept chain (homodimer carries the mutation in both subunits)
-    for cid in keep:
-        fixer.applyMutations([mut], cid)
+    # mutate every kept chain (homodimer carries the mutation in both subunits).
+    # Skipped for the FEP folded leg -- Perses introduces the mutation alchemically.
+    if apply_mutation:
+        for cid in keep:
+            fixer.applyMutations([mut], cid)
 
     # rebuild disordered internal loops (D5); or none if disabled
     fixer.findMissingResidues()
@@ -120,21 +130,36 @@ def prepare_variant(cfg: dict, variant: str, out_path: str | Path) -> Path:
     fixer.addMissingAtoms()
     fixer.addMissingHydrogens(scfg["ph"])     # CYS -> SH (reduced) at this pH
 
-    forcefield = ForceField("amber14-all.xml", f"amber14/{scfg['water_model']}.xml")
-    modeller = Modeller(fixer.topology, fixer.positions)
-    modeller.addSolvent(
-        forcefield,
-        model=scfg["water_model"],
-        padding=scfg["solvent_padding_nm"] * unit.nanometer,
-        ionicStrength=scfg["ion_conc_M"] * unit.molar,
-        neutralize=True,
-    )
+    if solvate:
+        forcefield = ForceField("amber14-all.xml", f"amber14/{scfg['water_model']}.xml")
+        modeller = Modeller(fixer.topology, fixer.positions)
+        modeller.addSolvent(
+            forcefield,
+            model=scfg["water_model"],
+            padding=scfg["solvent_padding_nm"] * unit.nanometer,
+            ionicStrength=scfg["ion_conc_M"] * unit.molar,
+            neutralize=True,
+        )
+        top, pos = modeller.topology, modeller.positions
+    else:
+        # WT/unsolvated: Perses solvates the hybrid itself (FEP folded leg).
+        top, pos = fixer.topology, fixer.positions
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
-        PDBFile.writeFile(modeller.topology, modeller.positions, f)
+        PDBFile.writeFile(top, pos, f)
     return out_path
+
+
+def prepare_wt_apo(cfg: dict, variant: str, out_path: str | Path) -> Path:
+    """WT (unmutated), apo/reduced, UNSOLVATED protein for the Perses FEP folded leg.
+
+    Same chain selection + loop rebuild + apo/reduced protonation as the mutant prep, but
+    the point mutation and solvation are left to Perses (see :mod:`src.fep.window`). The
+    variant is still required so the correct oligomeric state / chains are selected.
+    """
+    return prepare_variant(cfg, variant, out_path, apply_mutation=False, solvate=False)
 
 
 def main() -> None:
@@ -142,11 +167,18 @@ def main() -> None:
     parser.add_argument("--variant", required=True)
     parser.add_argument("--config", default=str(ROOT / "config" / "pipeline.yaml"))
     parser.add_argument("--out", required=True)
+    parser.add_argument("--wt", action="store_true",
+                        help="WT, unsolvated apo protein for the Perses FEP folded leg "
+                             "(no mutation, no solvent).")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    out = prepare_variant(cfg, args.variant, args.out)
-    print(f"Prepared {args.variant} -> {out}")
+    if args.wt:
+        out = prepare_wt_apo(cfg, args.variant, args.out)
+        print(f"Prepared WT apo (unsolvated) for {args.variant} -> {out}")
+    else:
+        out = prepare_variant(cfg, args.variant, args.out)
+        print(f"Prepared {args.variant} -> {out}")
 
 
 if __name__ == "__main__":
