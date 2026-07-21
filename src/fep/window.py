@@ -57,21 +57,20 @@ def mock_window(variant: str, leg: str, window: int, rep: int, n_states: int) ->
     return {"lambda_index": window, "n_states": n_states, "u_kn_window": u_kn_window}
 
 
-def _perses_window(cfg, variant, leg, window, rep):  # pragma: no cover
-    raise NotImplementedError(
-        "Perses/OpenMM window runs on a GPU (SCC). Set FEP_MOCK=1 to run the "
-        "pipeline locally with synthetic samples."
-    )
+def _perses_window(cfg, variant, leg, window, rep, smoke=False):  # pragma: no cover
+    """Real GPU window -- delegates to :mod:`src.fep.perses_engine` (SCC-only imports)."""
+    from src.fep.perses_engine import run_perses_window
+    return run_perses_window(cfg, variant, leg, window, rep, smoke=smoke)
 
 
 def run_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
-               out_path: str | Path) -> Path:
+               out_path: str | Path, smoke: bool = False) -> Path:
     """Produce one window's reduced potentials and write them to ``out_path`` (.npz)."""
     n_states = cfg["fep"]["lambda_windows"]
     if os.environ.get("FEP_MOCK"):
         data = mock_window(variant, leg, window, rep, n_states)
     else:
-        data = _perses_window(cfg, variant, leg, window, rep)
+        data = _perses_window(cfg, variant, leg, window, rep, smoke=smoke)
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,10 +86,14 @@ def main() -> None:
     parser.add_argument("--rep", type=int, required=True)
     parser.add_argument("--config", default=str(ROOT / "config" / "pipeline.yaml"))
     parser.add_argument("--out", required=True)
+    parser.add_argument("--smoke", action="store_true",
+                        help="Tiny step/frame counts to shake out the GPU/Perses path fast "
+                             "(real window; not a result). Ignored under FEP_MOCK.")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    out = run_window(cfg, args.variant, args.leg, args.window, args.rep, args.out)
+    out = run_window(cfg, args.variant, args.leg, args.window, args.rep, args.out,
+                     smoke=args.smoke)
     print(f"Wrote window {args.variant}/{args.leg}/w{args.window}_r{args.rep} -> {out}")
 
 
