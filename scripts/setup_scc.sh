@@ -5,11 +5,11 @@
 #
 #   bash scripts/setup_scc.sh            # build env + import checks (login node)
 #   qrsh -l gpus=1 -l gpu_c=7.0          # grab a GPU, then:
-#   bash scripts/setup_scc.sh --gpu      # OpenMM GPU/platform check
+#   bash scripts/setup_scc.sh --gpu      # GROMACS GPU check
 #
-# Module names default from config (cluster.conda_module / cluster.cuda_module).
+# Module names default from config (cluster.conda_module / cluster.gromacs_module).
 # Override for a different SCC if needed:
-#   CONDA_MODULE=miniconda/25.3.1 CUDA_MODULE=cuda/12.8 SOD1_ENV=sod1-fep
+#   CONDA_MODULE=miniconda/25.3.1 GROMACS_MODULE=gromacs/2025.3 SOD1_ENV=sod1-fep
 set -euo pipefail
 
 CONFIG="config/pipeline.yaml"
@@ -18,15 +18,18 @@ cfg_get() { grep -E "^[[:space:]]*$1:" "${CONFIG}" | head -1 | sed -E 's/^[^:]+:
 
 # Precedence: env-var override > config value.
 CONDA_MODULE="${CONDA_MODULE:-$(cfg_get conda_module)}"
-CUDA_MODULE="${CUDA_MODULE:-$(cfg_get cuda_module)}"
+GROMACS_MODULE="${GROMACS_MODULE:-$(cfg_get gromacs_module)}"
+CUDA_MODULE="${CUDA_MODULE:-$(cfg_get cuda_module)}"   # optional; gromacs usually pulls CUDA
 SOD1_ENV="${SOD1_ENV:-sod1-fep}"
 
 : "${CONDA_MODULE:?set cluster.conda_module in ${CONFIG} or CONDA_MODULE}"
-: "${CUDA_MODULE:?set cluster.cuda_module in ${CONFIG} or CUDA_MODULE}"
+: "${GROMACS_MODULE:?set cluster.gromacs_module in ${CONFIG} or GROMACS_MODULE}"
 
 echo "== module load =="
-module load "${CONDA_MODULE}" || echo "WARN: 'module load ${CONDA_MODULE}' failed -- set CONDA_MODULE"
-module load "${CUDA_MODULE}"  || echo "WARN: 'module load ${CUDA_MODULE}' failed -- set CUDA_MODULE"
+module load "${CONDA_MODULE}"   || echo "WARN: 'module load ${CONDA_MODULE}' failed -- set CONDA_MODULE"
+module load "${GROMACS_MODULE}" || echo "WARN: 'module load ${GROMACS_MODULE}' failed -- set GROMACS_MODULE"
+[[ -n "${CUDA_MODULE}" ]] && { module load "${CUDA_MODULE}" || echo "WARN: cuda module ${CUDA_MODULE} failed"; }
+command -v gmx >/dev/null && echo "  gmx: $(command -v gmx)" || echo "  WARN: gmx not on PATH after module load"
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
@@ -38,12 +41,22 @@ if [[ "${1:-}" != "--gpu" ]]; then
   echo "== import checks =="
   python - <<'PY'
 import importlib
-for m in ["openmm", "openmmtools", "perses", "pymbar", "mdtraj", "pdbfixer", "yaml", "numpy"]:
+for m in ["openmm", "pdbfixer", "pmx", "pymbar", "alchemlyb", "pandas", "yaml", "numpy"]:
     try:
         mod = importlib.import_module(m)
         print(f"  OK   {m:12} {getattr(mod, '__version__', '')}")
     except Exception as e:
         print(f"  FAIL {m:12} {e}")
+PY
+  echo "== pmx mutation force fields available =="
+  python - <<'PY'
+import os
+try:
+    import pmx
+    d = os.path.join(os.path.dirname(pmx.__file__), "data", "mutff")
+    print("  ", sorted(os.listdir(d)) if os.path.isdir(d) else f"no mutff dir at {d}")
+except Exception as e:
+    print("   pmx unavailable:", e)
 PY
   echo "== pipeline unit tests (no GPU) =="
   python -m pytest tests/ -q
@@ -51,17 +64,8 @@ PY
   echo "Next: grab a GPU (qrsh -l gpus=1 -l gpu_c=7.0) and run: bash scripts/setup_scc.sh --gpu"
 else
   conda activate "${SOD1_ENV}"
-  echo "== OpenMM platform / GPU check =="
-  python - <<'PY'
-import openmm
-from openmm import Platform
-print("OpenMM", openmm.__version__)
-for i in range(Platform.getNumPlatforms()):
-    print("  platform:", Platform.getPlatform(i).getName())
-try:
-    print("  CUDA platform available:", Platform.getPlatformByName("CUDA") is not None)
-except Exception as e:
-    print("  CUDA platform NOT available:", e)
-PY
+  echo "== GROMACS / GPU check =="
+  gmx --version 2>/dev/null | grep -Ei "GROMACS version|GPU support|CUDA (driver|runtime)" \
+    || echo "  WARN: 'gmx --version' failed -- is ${GROMACS_MODULE} loaded?"
   nvidia-smi --query-gpu=name,compute_cap,memory.total --format=csv || echo "nvidia-smi unavailable"
 fi

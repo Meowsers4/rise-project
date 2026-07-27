@@ -1,35 +1,38 @@
-# Conda environment for the SOD1 FEP variant pipeline.
-#   conda env create -f env/environment.yml   (or: mamba env create -f ...)
+# Conda environment for the SOD1 FEP variant pipeline (GROMACS + pmx).
+#   module load miniconda/25.3.1
+#   conda env create -f env/environment.yml     (or: mamba env create -f ...)
 #   conda activate sod1-fep
 #
-# FoldX and Rosetta (Stage 2) are licensed and module-loaded on the SCC, NOT conda
-# packages -- see env/modules.md. GPU builds of OpenMM come from conda-forge; on the
-# SCC load the matching CUDA module before running (env/modules.md).
+# GROMACS is NOT here -- it comes from the SCC module (cluster.gromacs_module) so the
+# cluster's own CUDA build is used, not a generic conda one.
+#
+# This env has only two jobs: prepare structures (Stage 1, via PDBFixer, which imports
+# OpenMM's app layer) and analyse free energies (Stage 3, MBAR over GROMACS dhdl output).
+# The alchemical transformation itself is GROMACS + pmx, so there is no OpenMM MD engine,
+# no openmmtools and no perses -- this solves in minutes rather than an hour.
 name: sod1-fep
 channels:
   - conda-forge
 dependencies:
   - python=3.11
-  # --- MD / alchemical FEP (D1: OpenMM + Perses) ---
+  # --- structure prep (Stage 1) -- PDBFixer imports openmm.app ---
   - openmm>=8.1
-  - openmmtools
-  - perses
-  - pymbar>=4
-  # --- structure prep (Stage 1) ---
   - pdbfixer
-  - propka
-  # --- trajectory analysis (Stage 4) ---
-  - mdtraj
-  - mdanalysis
-  # --- data / workflow / scientific stack ---
+  # --- free-energy analysis (Stage 3) ---
+  - pymbar>=4
+  - alchemlyb          # parses GROMACS dhdl.xvg -> u_nk matrices for MBAR
+  - pandas             # alchemlyb returns DataFrames
+  # --- data / scientific stack ---
   - numpy
   - scipy
-  - pandas
   - pyyaml
   # --- dev / test ---
   - pytest
   - pip
-  - setuptools <81      # perses imports the deprecated pkg_resources (setuptools); >=81 drops it
-# NOTE: snakemake is NOT here. The FEP run uses direct SGE qsub arrays
-# (scripts/submit_array.sh), so the compute env doesn't need it, and it bloats the
-# solve. If you want DAG orchestration, install snakemake in a separate login-node env.
+  - pip:
+      # pmx is not on conda-forge; install the maintained GROMACS-compatible branch.
+      # CONFIRM this resolves on the SCC. If pip fights it, clone the repo and
+      # `pip install -e .` from https://github.com/deGrootLab/pmx -- send me the error.
+      - pmx @ git+https://github.com/deGrootLab/pmx.git
+# NOTE: snakemake is deliberately absent -- Stage 3 dispatches via SGE qsub arrays
+# (scripts/submit_array.sh). Install it separately on a login node if you want the DAG.
