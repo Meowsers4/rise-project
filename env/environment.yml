@@ -30,9 +30,9 @@ dependencies:
   - pytest
   - pip
   - pip:
-      # pmx is not on conda-forge; install the maintained GROMACS-compatible branch.
-      # CONFIRM this resolves on the SCC. If pip fights it, clone the repo and
-      # `pip install -e .` from https://github.com/deGrootLab/pmx -- send me the error.
-      - pmx @ git+https://github.com/deGrootLab/pmx.git
+      # pmx is not on conda-forge. NOTE THE BRANCH: deGrootLab/pmx `master` is the legacy
+      # PYTHON 2 codebase (its metadata declares Requires-Python <3,>=2.7, so pip refuses
+      # it on 3.11). The Python 3 port is on `develop` -- that is the one we need.
+      - pmx @ git+https://github.com/deGrootLab/pmx.git@develop
 # NOTE: snakemake is deliberately absent -- Stage 3 dispatches via SGE qsub arrays
 # (scripts/submit_array.sh). Install it separately on a login node if you want the DAG.
