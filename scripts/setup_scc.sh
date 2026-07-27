@@ -19,7 +19,9 @@ cfg_get() { grep -E "^[[:space:]]*$1:" "${CONFIG}" | head -1 | sed -E 's/^[^:]+:
 # Precedence: env-var override > config value.
 CONDA_MODULE="${CONDA_MODULE:-$(cfg_get conda_module)}"
 GROMACS_MODULE="${GROMACS_MODULE:-$(cfg_get gromacs_module)}"
+GROMACS_PREREQ="${GROMACS_PREREQ:-$(cfg_get gromacs_prereq_modules)}"
 CUDA_MODULE="${CUDA_MODULE:-$(cfg_get cuda_module)}"   # optional; gromacs usually pulls CUDA
+GMX="${GMX:-$(cfg_get gmx_binary)}"
 SOD1_ENV="${SOD1_ENV:-sod1-fep}"
 
 : "${CONDA_MODULE:?set cluster.conda_module in ${CONFIG} or CONDA_MODULE}"
@@ -27,9 +29,26 @@ SOD1_ENV="${SOD1_ENV:-sod1-fep}"
 
 echo "== module load =="
 module load "${CONDA_MODULE}"   || echo "WARN: 'module load ${CONDA_MODULE}' failed -- set CONDA_MODULE"
+# Lmod prerequisites first, IN ORDER -- the SCC's gromacs/2025.3 is an OpenMPI build and
+# refuses to load without openmpi already present (cluster.gromacs_prereq_modules).
+for _m in ${GROMACS_PREREQ}; do
+  module load "${_m}" || echo "WARN: prerequisite 'module load ${_m}' failed"
+done
 module load "${GROMACS_MODULE}" || echo "WARN: 'module load ${GROMACS_MODULE}' failed -- set GROMACS_MODULE"
 [[ -n "${CUDA_MODULE}" ]] && { module load "${CUDA_MODULE}" || echo "WARN: cuda module ${CUDA_MODULE} failed"; }
-command -v gmx >/dev/null && echo "  gmx: $(command -v gmx)" || echo "  WARN: gmx not on PATH after module load"
+
+# MPI builds ship gmx_mpi, non-MPI builds ship gmx. Auto-detect unless pinned in config.
+if [[ -z "${GMX}" ]]; then
+  for _cand in gmx gmx_mpi; do
+    command -v "${_cand}" >/dev/null 2>&1 && { GMX="${_cand}"; break; }
+  done
+fi
+if [[ -n "${GMX}" ]]; then
+  echo "  gmx binary: ${GMX} -> $(command -v "${GMX}")"
+  echo "  >> record this as cluster.gmx_binary in ${CONFIG} if auto-detection is wrong"
+else
+  echo "  WARN: neither 'gmx' nor 'gmx_mpi' on PATH after loading ${GROMACS_MODULE}"
+fi
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
@@ -65,7 +84,12 @@ PY
 else
   conda activate "${SOD1_ENV}"
   echo "== GROMACS / GPU check =="
-  gmx --version 2>/dev/null | grep -Ei "GROMACS version|GPU support|CUDA (driver|runtime)" \
-    || echo "  WARN: 'gmx --version' failed -- is ${GROMACS_MODULE} loaded?"
+  if [[ -n "${GMX}" ]]; then
+    "${GMX}" --version 2>/dev/null \
+      | grep -Ei "GROMACS version|Precision|GPU support|SIMD|CUDA (driver|runtime)" \
+      || echo "  WARN: '${GMX} --version' produced nothing"
+  else
+    echo "  WARN: no gmx binary found -- cannot check GROMACS/GPU"
+  fi
   nvidia-smi --query-gpu=name,compute_cap,memory.total --format=csv || echo "nvidia-smi unavailable"
 fi

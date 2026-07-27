@@ -143,6 +143,12 @@ cluster:
                                     # 2025.3 is the SCC default and has the best GPU
                                     # free-energy support + the Gapsys soft-core.
                                     # Fallback if pmx trips on it: gromacs/2021.5
+  # Lmod prerequisites, loaded IN ORDER before gromacs_module. Space-separated (the
+  # setup/submit scripts read this with grep before python exists). The SCC's 2025.3 is
+  # an OpenMPI build and Lmod refuses to load it without this.
+  gromacs_prereq_modules: "openmpi/4.1.5_gnu-12.2.0"
+  gmx_binary: ""                    # leave empty to auto-detect: MPI builds ship gmx_mpi,
+                                    # non-MPI builds ship gmx. Set explicitly to override.
   cuda_module: ""                   # usually unnecessary -- the gromacs module pulls its own
                                     # CUDA. Set e.g. "cuda/12.8" only if gmx reports no GPU.
   gpu_c: "7.0"                   # request GPUs by compute capability >=7.0, not by model name
