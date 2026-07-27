@@ -147,8 +147,14 @@ cluster:
   # setup/submit scripts read this with grep before python exists). The SCC's 2025.3 is
   # an OpenMPI build and Lmod refuses to load it without this.
   gromacs_prereq_modules: "openmpi/4.1.5_gnu-12.2.0"
-  gmx_binary: ""                    # leave empty to auto-detect: MPI builds ship gmx_mpi,
-                                    # non-MPI builds ship gmx. Set explicitly to override.
+  gmx_binary: "gmx_mpi"             # CONFIRMED on the SCC: gromacs/2025.3 is an OpenMPI
+                                    # AVX2 build at install_mpi_avx2/bin/gmx_mpi. Because
+                                    # it is an MPI (not thread-MPI) build, mdrun launches
+                                    # under mpirun and -ntmpi is unavailable -- use -ntomp
+                                    # with the -pe omp slots. Empty = auto-detect.
+  mdrun_launcher: "mpirun -np 1"    # one rank per window (one window = one GPU); OpenMP
+                                    # threads come from -pe omp via mdrun_ntomp.
+  mdrun_ntomp: 8                    # keep equal to cluster.pe_omp
   cuda_module: ""                   # usually unnecessary -- the gromacs module pulls its own
                                     # CUDA. Set e.g. "cuda/12.8" only if gmx reports no GPU.
   gpu_c: "7.0"                   # request GPUs by compute capability >=7.0, not by model name
