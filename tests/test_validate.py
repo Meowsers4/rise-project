@@ -21,9 +21,10 @@ from src.analysis.validate import (
 
 CFG = {
     "panel": {"csv": "data/variants.csv"},
-    "fep": {"convergence": {"max_cycle_closure_kcal": 1.0}},
+    "fep": {"framework": "openmm_perses", "convergence": {"max_cycle_closure_kcal": 1.0}},
     "validation": {
         "min_pearson": 0.6,
+        "max_rmse_kcal": 1.5,
         "min_gate_points": 3,
         "destabilizing_ddg_kcal": 1.0,
         "gate_subset": ["A", "B", "C", "D"],
@@ -32,8 +33,9 @@ CFG = {
 }
 
 
-def _fep(ddg, converged=True, closure=0.3):
-    return {"ddg": ddg, "ddg_err": 0.3, "cycle_closure_kcal": closure, "converged": converged}
+def _fep(ddg, converged=True, closure=0.3, provenance="openmm_perses"):
+    return {"ddg": ddg, "ddg_err": 0.3, "cycle_closure_kcal": closure,
+            "converged": converged, "provenance": provenance}
 
 
 def test_gate_passes_on_good_correlation():
@@ -62,6 +64,54 @@ def test_gate_excludes_unconverged_and_enforces_floor():
     # only A and D usable -> below min_gate_points=3 -> cannot judge -> fail
     assert not gate["passed"] and gate["n"] == 2
     assert {e["variant"] for e in gate["excluded"]} >= {"B", "C"}
+
+
+def test_gate_excludes_mock_provenance():
+    """A mock ΔΔG must never reach the gate, however good the correlation looks."""
+    exp = {"A": 1.0, "B": 2.0, "C": 4.0, "D": 7.0}
+    fep = {v: _fep(exp[v] + 0.1, provenance="mock") for v in exp}
+    gate = evaluate_gate(fep, exp, CFG)
+    assert not gate["passed"] and gate["n"] == 0
+    assert all("not the production engine" in e["reason"] for e in gate["excluded"])
+
+
+def test_gate_excludes_missing_provenance():
+    """This is the fabricated-file case: a plausible ΔΔG with no recorded origin."""
+    exp = {"A": 1.0, "B": 2.0, "C": 4.0, "D": 7.0}
+    fep = {}
+    for v in exp:
+        rec = _fep(exp[v] + 0.1)
+        del rec["provenance"]           # hand-written / pre-provenance file
+        fep[v] = rec
+    gate = evaluate_gate(fep, exp, CFG)
+    assert not gate["passed"] and gate["n"] == 0
+    assert all("'MISSING'" in e["reason"] for e in gate["excluded"])
+
+
+def test_classification_skips_non_production():
+    panel = [{"variant": "X1Y", "bucket": "vus", "oligomer": "monomer"}]
+    assert classify_uncharacterized({"X1Y": _fep(3.5, provenance="mock")}, panel, CFG) == []
+    assert len(classify_uncharacterized({"X1Y": _fep(3.5)}, panel, CFG)) == 1
+
+
+def test_gate_fails_on_good_correlation_but_bad_accuracy():
+    """The case correlation alone cannot see: perfectly ranked, systematically wrong."""
+    exp = {"A": 1.0, "B": 2.0, "C": 4.0, "D": 7.0}
+    fep = {v: _fep(exp[v] * 0.5) for v in exp}      # every value half the truth
+    gate = evaluate_gate(fep, exp, CFG)
+    assert gate["pearson"] > 0.99                   # correlation says "perfect"
+    assert gate["rmse"] > 1.5 and not gate["passed"]
+    assert "rmse" in gate["reason"]
+    assert gate["slope"] == pytest.approx(0.5, abs=0.01)
+
+
+def test_accuracy_metrics_reported():
+    exp = {"A": 1.0, "B": 2.0, "C": 4.0, "D": 7.0}
+    gate = evaluate_gate({v: _fep(exp[v] + 0.2) for v in exp}, exp, CFG)
+    assert gate["passed"]
+    assert gate["rmse"] == pytest.approx(0.2, abs=0.01)
+    assert gate["mue"] == pytest.approx(0.2, abs=0.01)
+    assert gate["slope"] == pytest.approx(1.0, abs=0.01)
 
 
 def test_never_lowers_threshold():

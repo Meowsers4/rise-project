@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.prep.build import load_config, load_variant_record
+from src.prep.build import _THREE, load_config, load_variant_record
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -38,12 +38,15 @@ def _unitvec(v: np.ndarray) -> np.ndarray:
 
 
 def build_capped_tripeptide(wt_pdb: str | Path, center: int, chain_id: str | None,
-                            ph: float):
+                            ph: float, expect_resname: str | None = None):
     """Return (topology, positions) for ACE-[i-1][i][i+1]-NME with hydrogens added.
 
     ``center`` is the residue id (structure numbering) of the mutation site; its two
     sequence neighbours are taken from the same chain. ``chain_id`` selects the protein
     chain (``None`` -> the chain that contains ``center``; first match wins -- monomer scope).
+    ``expect_resname`` is the three-letter wild-type residue the panel says sits at
+    ``center``; when given, a mismatch raises rather than silently building the unfolded
+    reference for the wrong residue.
     """
     from openmm import Vec3, unit
     from openmm.app import PDBFile, Topology
@@ -77,6 +80,11 @@ def build_capped_tripeptide(wt_pdb: str | Path, center: int, chain_id: str | Non
             break
     if trio is None:
         raise KeyError(f"residue id {center} not found (chain={chain_id!r}) in {wt_pdb}")
+    if expect_resname is not None and trio[1].name != expect_resname:
+        raise ValueError(
+            f"residue {center} in {wt_pdb} is {trio[1].name}, panel says {expect_resname}. "
+            "Refusing to build the unfolded reference for the wrong residue."
+        )
 
     def coord(old_atom):
         return allpos[atom_index[old_atom]]
@@ -160,7 +168,8 @@ def build_tripeptide(cfg: dict, variant: str, wt_pdb: str | Path, out_path: str 
     record = load_variant_record(ROOT / cfg["panel"]["csv"], variant)
     center = int(record["mature_pos"])
     ph = cfg["structure"]["ph"]
-    top, positions = build_capped_tripeptide(wt_pdb, center, chain_id=None, ph=ph)
+    top, positions = build_capped_tripeptide(wt_pdb, center, chain_id=None, ph=ph,
+                                             expect_resname=_THREE[record["wt_aa"]])
 
     if validate:  # fail loudly here rather than deep inside a GPU job
         scfg = cfg["structure"]

@@ -9,9 +9,19 @@ per variant with no manual steps. Pipeline (PDBFixer + OpenMM ``Modeller``):
 3. Rebuild 3ECU's disordered metal-binding loops (D5) via PDBFixer missing-residue/
    atom addition -- internal gaps only, not terminal tails.
 4. Strip all heteroatoms (metals + crystal waters) -> apo (§2.1).
-5. Protonate at ``structure.ph``; cysteines get HG (free thiols) -> disulfide REDUCED.
+5. Break the Cys57-Cys146 disulfide, then protonate at ``structure.ph`` so both
+   cysteines get HG (free thiols) -> disulfide REDUCED, and VERIFY it.
 6. Solvate (``water_model``) with ``solvent_padding_nm`` padding and neutralize to
    ``ion_conc_M``.
+
+Step 5 is not automatic. 3ECU ships ``SSBOND CYS A 57 - CYS A 146`` at 2.04 A; OpenMM
+infers that bond on load and ``addMissingHydrogens`` then (correctly) refuses to add HG
+to a bonded cysteine -- so simply protonating an oxidized crystal structure yields the
+OXIDIZED form, silently, which is the opposite of the disease-relevant species this
+project is built around. :func:`strip_disulfide_bonds` removes the bond first and
+:func:`assert_disulfide_reduced` fails the build if the result is not actually reduced.
+The freed thiols start ~2 A apart, i.e. clashing; energy minimisation before production
+must relax them (``fep.minimize``).
 
 Everything is read from ``config/pipeline.yaml``; nothing is hardcoded (CLAUDE.md #4).
 Apo-first and reduced-disulfide are enforced here, not optional (§2.1, CLAUDE.md #1).
@@ -67,6 +77,88 @@ def chains_for_oligomer(pdb_path: str | Path, oligomer: str, ref_chain: str = "A
     raise ValueError(f"unknown oligomer {oligomer!r} (expected monomer|dimer)")
 
 
+def assert_wt_residue(topology, chain_ids: list[str], mature_pos: int, wt_aa: str) -> None:
+    """Verify the residue at ``mature_pos`` really is ``wt_aa`` in every kept chain.
+
+    The pipeline addresses residues by MATURE position and relies on the starting PDB
+    using mature numbering (3ECU does: resSeq 1-153). Nothing else checks that, so a
+    structure numbered any other way -- e.g. ``structure.fallback_pdb`` -- would mutate a
+    silently wrong residue and every ΔΔG downstream would be for a different variant.
+
+    Args:
+        topology: OpenMM ``Topology`` to inspect.
+        chain_ids: Chain ids that must each carry the residue.
+        mature_pos: Mature-numbered residue position from the panel.
+        wt_aa: Expected one-letter wild-type residue from the panel.
+
+    Raises:
+        ValueError: If the residue is absent or is not the expected wild type.
+    """
+    want = _THREE[wt_aa]
+    for cid in chain_ids:
+        chain = next((c for c in topology.chains() if c.id == cid), None)
+        if chain is None:
+            raise ValueError(f"chain {cid!r} not found in the starting structure")
+        res = next((r for r in chain.residues() if r.id == str(mature_pos)), None)
+        if res is None:
+            raise ValueError(
+                f"chain {cid}: no residue numbered {mature_pos}. The starting structure "
+                "is not in mature numbering (project.mature_offset applies to the "
+                "precursor, not to residue ids in the PDB)."
+            )
+        if res.name != want:
+            raise ValueError(
+                f"chain {cid}: residue {mature_pos} is {res.name}, panel says {want} "
+                f"({wt_aa}). Refusing to mutate the wrong residue -- check that "
+                "structure.starting_pdb uses mature (153-residue) numbering."
+            )
+
+
+def strip_disulfide_bonds(topology) -> list[tuple[str, str]]:
+    """Remove every SG-SG bond from ``topology`` in place; return the pairs removed.
+
+    Must run AFTER ``addMissingAtoms`` (which rebuilds the topology) and BEFORE
+    ``addMissingHydrogens``: OpenMM decides CYS-vs-CYX from these bonds, so the bond has
+    to be gone before protonation for the thiol hydrogens to be added.
+    """
+    removed = [
+        (b[0].residue.id, b[1].residue.id)
+        for b in topology.bonds()
+        if b[0].name == "SG" and b[1].name == "SG"
+    ]
+    if removed:
+        # Topology exposes no public bond removal; _bonds is the list bonds() iterates.
+        topology._bonds = [
+            b for b in topology._bonds
+            if not (b[0].name == "SG" and b[1].name == "SG")
+        ]
+    return removed
+
+
+def assert_disulfide_reduced(topology) -> None:
+    """Fail unless every cysteine is a free thiol (has HG) and no SG-SG bond survives.
+
+    Raises:
+        ValueError: If the structure is oxidized -- v1 is reduced-only (CLAUDE.md #1).
+    """
+    surviving = [
+        (b[0].residue.id, b[1].residue.id)
+        for b in topology.bonds()
+        if b[0].name == "SG" and b[1].name == "SG"
+    ]
+    unprotonated = [
+        f"{r.name}{r.id}"
+        for r in topology.residues()
+        if any(a.name == "SG" for a in r.atoms()) and not any(a.name == "HG" for a in r.atoms())
+    ]
+    if surviving or unprotonated:
+        raise ValueError(
+            "disulfide is NOT reduced: "
+            f"surviving SG-SG bonds={surviving}, cysteines without HG={unprotonated}. "
+            "v1 simulates the apo, disulfide-REDUCED form (README §2.1, CLAUDE.md #1)."
+        )
+
+
 def _trim_terminal_missing(fixer) -> None:
     """Drop terminal missing residues so we rebuild internal loops only, not new tails."""
     chains = list(fixer.topology.chains())
@@ -110,6 +202,10 @@ def prepare_variant(cfg: dict, variant: str, out_path: str | Path,
     remove = [i for i, cid in enumerate(all_chain_ids) if cid not in keep]
     fixer.removeChains(remove)
 
+    # the panel addresses residues by mature position; prove that matches this structure
+    # BEFORE mutating anything (CLAUDE.md #3).
+    assert_wt_residue(fixer.topology, keep, int(record["mature_pos"]), record["wt_aa"])
+
     # mutate every kept chain (homodimer carries the mutation in both subunits).
     # Skipped for the FEP folded leg -- Perses introduces the mutation alchemically.
     if apply_mutation:
@@ -128,7 +224,12 @@ def prepare_variant(cfg: dict, variant: str, out_path: str | Path,
     fixer.removeHeterogens(keepWater=False)  # strip metals + crystal waters -> apo
     fixer.findMissingAtoms()
     fixer.addMissingAtoms()
-    fixer.addMissingHydrogens(scfg["ph"])     # CYS -> SH (reduced) at this pH
+
+    # Break the crystal disulfide BEFORE protonating, else addMissingHydrogens leaves
+    # Cys57/Cys146 bonded and unprotonated -> the OXIDIZED form (see module docstring).
+    strip_disulfide_bonds(fixer.topology)
+    fixer.addMissingHydrogens(scfg["ph"])     # CYS -> SH (free thiols) at this pH
+    assert_disulfide_reduced(fixer.topology)  # verify; never assume
 
     if solvate:
         forcefield = ForceField("amber14-all.xml", f"amber14/{scfg['water_model']}.xml")

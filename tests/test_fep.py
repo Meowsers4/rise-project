@@ -7,6 +7,9 @@ free energy, so MBAR must recover the injected ΔΔG. No GPU/Perses required.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -14,9 +17,11 @@ import pytest
 
 from src.fep.analyze import _KB_KCAL, analyze_variant, leg_hysteresis_kT
 from src.fep.window import run_window
+from src.seeds import stable_seed
 
 FEP_CFG = {
     "fep": {
+        "framework": "openmm_perses",
         "lambda_windows": 12,
         "replicates": 3,
         "legs": ["folded", "unfolded"],
@@ -28,18 +33,20 @@ _KT = _KB_KCAL * 298.15
 
 
 def _write_oscillator_leg(fep_dir: Path, variant: str, leg: str, dG_kT: float,
-                          n_states: int, n_reps: int, n_samples: int = 400) -> None:
+                          n_states: int, n_reps: int, n_samples: int = 400,
+                          provenance: str = "openmm_perses") -> None:
     """Write a leg's windows as harmonic oscillators with total free energy dG_kT."""
     K = np.exp(2.0 * dG_kT * np.arange(n_states) / (n_states - 1))  # K_0 = 1
     for rep in range(n_reps):
-        rng = np.random.default_rng(abs(hash((variant, leg, rep))) % (2**32))
+        rng = np.random.default_rng(stable_seed(variant, leg, rep))
         for w in range(n_states):
             x = rng.normal(0.0, 1.0 / np.sqrt(K[w]), size=n_samples)
             u_kn_window = 0.5 * K[:, None] * (x[None, :] ** 2)
             d = fep_dir / variant / leg
             d.mkdir(parents=True, exist_ok=True)
             np.savez(d / f"w{w}_r{rep}.npz",
-                     lambda_index=w, n_states=n_states, u_kn_window=u_kn_window)
+                     lambda_index=w, n_states=n_states, u_kn_window=u_kn_window,
+                     provenance=provenance)
 
 
 def test_run_window_mock_schema(tmp_path, monkeypatch):
@@ -51,6 +58,46 @@ def test_run_window_mock_schema(tmp_path, monkeypatch):
     assert int(npz["lambda_index"]) == 3
     assert npz["u_kn_window"].shape[0] == 12
     assert np.all(np.isfinite(npz["u_kn_window"]))
+    assert str(npz["provenance"]) == "mock"   # mock must be self-identifying
+
+
+def test_mock_window_is_identical_across_processes():
+    """Regression: hash() is per-process randomized, so seeding from it gave every SGE
+    array task a different oscillator ladder and MBAR silently blended them."""
+    root = Path(__file__).resolve().parents[1]
+    code = ("from src.fep.window import _stable_target_kT, mock_window;"
+            "d=mock_window('A4V','folded',3,0,12);"
+            "print(_stable_target_kT('A4V','folded'), d['u_kn_window'].sum())")
+    outs = set()
+    for hashseed in ("0", "1", "random"):
+        env = {**os.environ, "PYTHONHASHSEED": hashseed}
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                           cwd=root, env=env, check=True)
+        outs.add(r.stdout.strip())
+    assert len(outs) == 1, f"mock window is not process-stable: {outs}"
+
+
+def test_analyze_rejects_mixed_provenance(tmp_path):
+    fep_dir = tmp_path / "fep"
+    _write_oscillator_leg(fep_dir, "TEST", "folded", 2.0, 12, 1)
+    _write_oscillator_leg(fep_dir, "TEST", "unfolded", 1.0, 12, 1, provenance="mock")
+    cfg = {"fep": {**FEP_CFG["fep"], "replicates": 1}}
+    with pytest.raises(ValueError, match="disagree on provenance"):
+        analyze_variant(cfg, "TEST", tmp_path / "ddg.json", fep_dir=fep_dir)
+
+
+def test_analyze_rejects_window_without_provenance(tmp_path):
+    """An unlabelled window is indistinguishable from a hand-written one."""
+    fep_dir = tmp_path / "fep"
+    _write_oscillator_leg(fep_dir, "TEST", "folded", 2.0, 12, 1)
+    _write_oscillator_leg(fep_dir, "TEST", "unfolded", 1.0, 12, 1)
+    stripped = fep_dir / "TEST" / "folded" / "w0_r0.npz"
+    d = dict(np.load(stripped))
+    d.pop("provenance")
+    np.savez(stripped, **d)
+    cfg = {"fep": {**FEP_CFG["fep"], "replicates": 1}}
+    with pytest.raises(ValueError, match="no provenance recorded"):
+        analyze_variant(cfg, "TEST", tmp_path / "ddg.json", fep_dir=fep_dir)
 
 
 def test_mbar_recovers_known_ddg(tmp_path):
@@ -74,9 +121,41 @@ def test_analyze_writes_gate_schema(tmp_path):
     out = tmp_path / "ddg.json"
     analyze_variant(FEP_CFG, "TEST", out, fep_dir=fep_dir)
     saved = json.loads(out.read_text())
-    assert set(saved) >= {"variant", "ddg", "ddg_err", "cycle_closure_kcal", "converged"}
+    assert set(saved) >= {"variant", "ddg", "ddg_err", "cycle_closure_kcal", "converged",
+                          "provenance"}
+    assert saved["provenance"] == "openmm_perses"   # stamped through from the windows
     # equal legs -> ΔΔG ~ 0
     assert saved["ddg"] == pytest.approx(0.0, abs=0.2)
+
+
+def test_decorrelation_thins_correlated_samples(tmp_path):
+    """Correlated frames must be thinned; i.i.d. frames should survive nearly intact."""
+    from src.fep.analyze import decorrelate_window
+
+    n_states, n = 6, 600
+    rng = np.random.default_rng(0)
+    # strongly autocorrelated series (AR(1), phi=0.95) -> should thin hard
+    x = np.zeros(n)
+    for i in range(1, n):
+        x[i] = 0.95 * x[i - 1] + rng.normal(0, 1)
+    u_corr = np.tile(x, (n_states, 1))
+    kept_corr = decorrelate_window(u_corr, 0).shape[1]
+
+    u_iid = np.tile(rng.normal(0, 1, n), (n_states, 1))
+    kept_iid = decorrelate_window(u_iid, 0).shape[1]
+
+    assert kept_corr < n / 4, f"correlated series barely thinned ({kept_corr}/{n})"
+    assert kept_iid > n / 2, f"i.i.d. series over-thinned ({kept_iid}/{n})"
+
+
+def test_decorrelation_recorded_in_output(tmp_path):
+    fep_dir = tmp_path / "fep"
+    _write_oscillator_leg(fep_dir, "TEST", "folded", 2.0, 12, 1)
+    _write_oscillator_leg(fep_dir, "TEST", "unfolded", 2.0, 12, 1)
+    cfg = {"fep": {**FEP_CFG["fep"], "replicates": 1, "decorrelate": True}}
+    r = analyze_variant(cfg, "TEST", tmp_path / "ddg.json", fep_dir=fep_dir)
+    assert r["decorrelated"] is True
+    assert 0 < r["n_samples_independent"] <= r["n_samples_raw"]
 
 
 def test_hysteresis_small_for_good_overlap():

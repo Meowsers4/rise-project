@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 
 from src.prep.build import load_variant_record
+from src.seeds import stable_seed
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -150,7 +151,16 @@ def _build_htf(cfg: dict, variant: str, leg: str):
     we drive the engine directly: solvate the WT with OpenMM's amber14 ForceField (same FF as
     prep), ``PointMutationEngine`` proposes the residue swap, ``FFAllAngleGeometryEngine`` places
     the new atoms, and ``HybridTopologyFactory`` builds the alchemical system. No OpenEye needed.
+
+    Seeded on ``(variant, leg)`` ONLY -- deliberately not on window/replicate. MBAR combines
+    windows on the assumption they share one Hamiltonian, but ``Modeller.addSolvent`` picks ion
+    positions with the unseeded global ``random``, so unseeded jobs would each build a slightly
+    different solvated system. Seeding per-leg makes all 90 jobs of a leg build the identical
+    system; the replicate's independence comes from velocities instead (see
+    :func:`run_perses_window`).
     """
+    import random
+
     from openmm import app, unit
     from openmmforcefields.generators import SystemGenerator
     from openmmtools.constants import kB
@@ -162,6 +172,14 @@ def _build_htf(cfg: dict, variant: str, leg: str):
     scfg, fcfg = cfg["structure"], cfg["fep"]
     pdb_path = _input_structure(cfg, variant, leg)
     T = float(fcfg["temperature_K"]) * unit.kelvin
+
+    # System seed: every window/replicate of this leg must build the SAME system. These
+    # are the process-global RNGs addSolvent and the geometry engine draw from; one job
+    # == one process, so seeding them globally here is contained.
+    system_seed = stable_seed(variant, leg, "system")
+    random.seed(system_seed)
+    np.random.seed(system_seed)
+    _log(f"   system seed (variant, leg) = {system_seed}")
 
     constraints = {"HBonds": app.HBonds, "AllBonds": app.AllBonds, "None": None}[fcfg["constraints"]]
     ff_kwargs = {"removeCMMotion": False, "constraints": constraints, "rigidWater": True}
@@ -263,7 +281,8 @@ def run_perses_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     """Sample one lambda window on GPU and return reduced potentials at every state.
 
     Returns the ``src.fep.window`` NPZ dict: ``lambda_index``, ``n_states``, ``u_kn_window``
-    of shape ``(n_states, n_frames)``.
+    of shape ``(n_states, n_frames)``, and ``provenance`` (the ``fep.framework`` that ran
+    it, so the gate can tell a real window from a mock one).
     """
     from openmm import LangevinMiddleIntegrator, LocalEnergyMinimizer, Platform, unit
     from openmmtools.states import SamplerState
@@ -289,22 +308,28 @@ def run_perses_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
 
     # dynamics context pinned at THIS window's state, on the scheduler-assigned GPU
     # (CUDA_VISIBLE_DEVICES already masks the device -- never set DeviceIndex, CLAUDE.md).
+    # Sampling seed: distinct per replicate, which is what actually makes the 5 replicates
+    # independent AND reproducible. Unseeded, replicates differ only by OS entropy and a
+    # rerun can never reproduce a number (CLAUDE.md #5). 0 means "pick randomly" to OpenMM.
+    sampling_seed = stable_seed(variant, leg, window, rep, "sampling") or 1
     with _stage(f"create CUDA context @ lambda[{window}]={_lambda_value(window, n_states):.3f}"):
         platform = Platform.getPlatformByName("CUDA")
         integrator = LangevinMiddleIntegrator(T, friction, dt)
+        integrator.setRandomNumberSeed(sampling_seed)
         context = states[window].create_context(integrator, platform)
         sampler_state.apply_to_context(context)
     if fcfg.get("minimize", True):
         with _stage("minimize"):
             LocalEnergyMinimizer.minimize(context)
-    context.setVelocitiesToTemperature(T)
+    context.setVelocitiesToTemperature(T, sampling_seed)
 
     ckpt = ROOT / "results" / "fep" / variant / leg / f"w{window}_r{rep}.ckpt.npz"
     u_kn = np.zeros((n_states, geom["frames"]))
     start_frame = 0
     if ckpt.exists() and not smoke:                       # resume a killed window
         with _stage(f"resume from checkpoint {ckpt.name}"):
-            start_frame, u_kn, sampler_state = _load_checkpoint(ckpt, u_kn, sampler_state, context)
+            start_frame, u_kn, sampler_state = _load_checkpoint(
+                ckpt, u_kn, sampler_state, context, sampling_seed)
 
     if start_frame == 0:
         with _stage(f"equilibrate ({geom['equil_steps']} steps)"):
@@ -333,7 +358,8 @@ def run_perses_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
 
     ckpt.unlink(missing_ok=True)
     _log(f"window done: {variant}/{leg} w{window} r{rep} u_kn{u_kn.shape} finite")
-    return {"lambda_index": window, "n_states": n_states, "u_kn_window": u_kn}
+    return {"lambda_index": window, "n_states": n_states, "u_kn_window": u_kn,
+            "provenance": cfg["fep"]["framework"]}
 
 
 # --------------------------- checkpoint/resume (windows die) ---------------------------
@@ -352,12 +378,13 @@ def _save_checkpoint(path: Path, next_frame: int, u_kn: np.ndarray, sampler_stat
     tmp.replace(path)
 
 
-def _load_checkpoint(path: Path, u_kn: np.ndarray, sampler_state, context):
+def _load_checkpoint(path: Path, u_kn: np.ndarray, sampler_state, context, seed: int):
     from openmm import unit
     d = np.load(path)
     u_kn[:] = d["u_kn"]
     sampler_state.positions = d["positions"] * unit.nanometer
     sampler_state.box_vectors = d["box"] * unit.nanometer
     sampler_state.apply_to_context(context)
-    context.setVelocitiesToTemperature(context.getIntegrator().getTemperature())
+    # seeded like the initial draw, so a resumed window is still reproducible
+    context.setVelocitiesToTemperature(context.getIntegrator().getTemperature(), seed)
     return int(d["next_frame"]), u_kn, sampler_state

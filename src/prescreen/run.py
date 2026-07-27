@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from src.prep.build import load_config, load_variant_record
+from src.seeds import stable_seed
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -92,8 +93,9 @@ class MockBackend:
 
     def run(self, method: str, record: dict, cfg: dict) -> list[float]:
         n = cfg["prescreen"]["runs_per_variant"] if method == "foldx" else 1
-        seed = abs(hash((method, record["variant"]))) % (2**32)
-        rng = np.random.default_rng(seed)
+        # stable_seed, not hash: hash is randomized per process, so "deterministic"
+        # would have meant "different in every job" (see src/seeds.py).
+        rng = np.random.default_rng(stable_seed(method, record["variant"]))
         center = 0.5 * (int(record["mature_pos"]) % 7) - 1.0  # arbitrary but deterministic
         return [float(center + rng.normal(0, 0.3)) for _ in range(n)]
 

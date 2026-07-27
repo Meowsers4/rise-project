@@ -8,13 +8,17 @@ The real engine is OpenMM + Perses (GPU) and is isolated behind a backend, so th
 pipeline runs locally in **mock mode** (``FEP_MOCK=1``) using synthetic
 harmonic-oscillator samples of *known* free energy -- enough to exercise the window
 IO, the checkpoint/output schema, and the MBAR analyzer without a GPU. Mock output is
-never a result.
+never a result, and that is ENFORCED rather than documented: every window records a
+``provenance`` string, :mod:`src.fep.analyze` refuses to mix provenances and stamps the
+per-variant ΔΔG with it, and :mod:`src.analysis.validate` refuses to gate on anything
+whose provenance is not the configured ``fep.framework``.
 
 NPZ schema (one window):
     lambda_index : int                          state k this window sampled
     n_states     : int                          lambda windows in this leg
     u_kn_window  : (n_states, n_samples) float  reduced potential (U/kT) of this
                                                 window's samples at every state
+    provenance   : str                          "mock" or the fep.framework that ran it
 """
 
 from __future__ import annotations
@@ -26,15 +30,21 @@ from pathlib import Path
 import numpy as np
 
 from src.prep.build import load_config
+from src.seeds import stable_seed
 
 ROOT = Path(__file__).resolve().parents[2]
 _MOCK_SAMPLES = 300
+MOCK_PROVENANCE = "mock"
 
 
 def _stable_target_kT(variant: str, leg: str) -> float:
-    """Deterministic per-(variant, leg) free energy (kT) for the mock oscillator ladder."""
-    seed = abs(hash((variant, leg, "dG"))) % (2**32)
-    rng = np.random.default_rng(seed)
+    """Deterministic per-(variant, leg) free energy (kT) for the mock oscillator ladder.
+
+    Seeded via :func:`src.seeds.stable_seed`, NOT ``hash``: every window of a leg runs in
+    its own process, so a per-process seed would give each window a different oscillator
+    ladder and MBAR would silently combine incompatible states.
+    """
+    rng = np.random.default_rng(stable_seed(variant, leg, "dG"))
     return float(rng.uniform(-3.0, 12.0))  # arbitrary but reproducible, kT units
 
 
@@ -50,11 +60,12 @@ def mock_window(variant: str, leg: str, window: int, rep: int, n_states: int) ->
     k_idx = np.arange(n_states)
     K = np.exp(2.0 * dG * k_idx / (n_states - 1))  # spring constants, K_0 = 1
 
-    rng = np.random.default_rng(abs(hash((variant, leg, window, rep))) % (2**32))
+    rng = np.random.default_rng(stable_seed(variant, leg, window, rep))
     x = rng.normal(0.0, 1.0 / np.sqrt(K[window]), size=_MOCK_SAMPLES)
     # u_kn_window[l, n] = 0.5 * K_l * x_n^2
     u_kn_window = 0.5 * K[:, None] * (x[None, :] ** 2)
-    return {"lambda_index": window, "n_states": n_states, "u_kn_window": u_kn_window}
+    return {"lambda_index": window, "n_states": n_states, "u_kn_window": u_kn_window,
+            "provenance": MOCK_PROVENANCE}
 
 
 def _perses_window(cfg, variant, leg, window, rep, smoke=False):  # pragma: no cover
@@ -71,6 +82,9 @@ def run_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
         data = mock_window(variant, leg, window, rep, n_states)
     else:
         data = _perses_window(cfg, variant, leg, window, rep, smoke=smoke)
+    # A window without provenance cannot be told apart from a hand-written file.
+    data.setdefault("provenance", MOCK_PROVENANCE if os.environ.get("FEP_MOCK")
+                    else cfg["fep"]["framework"])
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

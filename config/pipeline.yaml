@@ -14,7 +14,10 @@ project:
 structure:
   form: apo                 # apo | holo   -- KEEP apo for v1 (README §2.1)
   disulfide: reduced        # reduced | oxidized  (apo disease-relevant = reduced)
-  starting_pdb: 3ECU        # apo, reduced, WT human SOD1 dimer, 1.90 Å (RCSB 3ECU)
+  starting_pdb: 3ECU        # apo (no metals), WT human SOD1, 1.90 Å, 4 chains in the AU (RCSB 3ECU)
+                            # NB: 3ECU is apo but disulfide-OXIDIZED (SSBOND Cys57-Cys146, 2.04 Å).
+                            # src/prep/build.py breaks that bond before protonating and verifies
+                            # the result; do not assume "apo" implies "reduced" here.
   fallback_pdb: 2C9V        # 1.07 Å metallated; strip metals + re-equilibrate IF apo loop rebuild is unstable
   default_oligomer: monomer # monomer | dimer -- per-variant override in variants.csv
   interface_cutoff_A: 5.0   # residue -> dimer if any heavy atom within this of the partner monomer (Stage 0)
@@ -50,16 +53,20 @@ prescreen:                  # Stage 2 — cheap empirical ddG (CPU)
 
 fep:                        # Stage 3 — the cluster workhorse (GPU)
   framework: openmm_perses  # openmm_perses | gromacs_pmx | amber_ti  (resolved: OpenMM+Perses)
-  lambda_windows: 18        # 12 | 18 | 24  -- cost vs precision
-  replicates: 5             # >=3 required; 5 recommended
+  lambda_windows: 18        # 12 | 18 | 24  -- cost vs precision.
+                            # KEEP 18: windows run independently (no replica exchange), so
+                            # neighbour overlap comes from window density alone. Cutting to
+                            # 12 is the one economy that biases ddG rather than just adding
+                            # noise -- cut replicates/length first.
+  replicates: 3             # >=3 required (README). 3 = the FLOOR, do not go lower.
   legs:                     # thermodynamic cycle
     - folded                # mutation in the folded protein
     - unfolded              # mutation in capped tripeptide reference
   softcore: true
   estimator: mbar
   temperature_K: 298.15     # reduced potentials -> kcal/mol conversion (kT)
-  ns_per_window: 5          # production time per lambda window
-  equilibration_ns: 1
+  ns_per_window: 3          # production time per lambda window
+  equilibration_ns: 0.5
   # --- real Perses window: integrator / ensemble / alchemy (read by src/fep/window.py) ---
   # Solvation reuses structure.solvent_padding_nm + structure.ion_conc_M (Perses solvates the
   # WT hybrid). Force field reuses structure.ff_protein + structure.water_model.
@@ -73,7 +80,10 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   nonbonded_method: PME
   nonbonded_cutoff_nm: 1.0
   minimize: true               # energy-minimize each window before equilibration
-  frames_per_window: 250       # samples collected per window = n_samples (5 ns / 20 ps save interval)
+  frames_per_window: 150       # samples collected per window = n_samples (3 ns / 20 ps save interval)
+  decorrelate: true            # subsample to statistically independent frames (pymbar.timeseries)
+                               # before MBAR. Correlated frames make MBAR's error bar look
+                               # ~sqrt(g) times smaller than it is; g is the correlation time.
   lambda_protocol: default     # Perses LambdaProtocol name (resolved: validated default schedule)
   unfolded_reference: tripeptide_native  # ACE-[i-1][i][i+1]-NME, neighbors from the WT structure
   checkpoint_interval_steps: 50000       # write resumable checkpoint every N production steps (CLAUDE.md)
@@ -100,11 +110,25 @@ validation:                 # Stage 5 — the GATE (README §2.2)
   ddg_gate_column: exp_ddg  # apo-MONOMER ddG is the gate value; exp_ddg_dimer is a
                             # carried cross-check only and is NOT used in the gate.
   cross_check: [foldx, rosetta_cartesian_ddg]
-  # M3 validates on this ~12-variant subset (spans the ddG range) BEFORE scaling to
-  # the full 54 controls. Every entry must exist in the controls (build.py enforces).
+  # M3 validates on this 8-variant subset BEFORE scaling to the full 54 controls.
+  # Every entry must exist in the controls (build.py enforces).
+  #
+  # CHARGE-NEUTRAL ONLY (resolved 2026-07-26). A mutation that changes net charge carries
+  # a PME finite-size artifact that does NOT cancel between the folded and unfolded legs
+  # (different box sizes), worth a few kcal/mol against a 0-7 kcal/mol signal. The engine
+  # drives Perses' lower-level API, which has no counterion co-alchemy, so charge-changing
+  # variants (G93D, G93R, D90A, D101N, H46R, N139K) are OUT of the gate until that is
+  # handled. 37 of the 54 controls are charge-neutral, so this costs nothing in coverage.
+  #
+  # Spread: -0.20 .. 7.00 kcal/mol. G93A/G93S/G93V is a same-site ladder (2.43/3.70/7.00)
+  # that doubles as an internal consistency check.
   gate_subset:
-    [G93V, G93D, G93R, G93A, A4V, I113T, D90A, V81A, N139K, D101N, H46R, F64A]
+    [F64A, I18V, I113T, A4V, G93A, G93S, I149A, G93V]
   min_gate_points: 6            # require >= this many gate_subset variants (FEP + exp) to judge
+                                # (8 submitted, so 2 may fail/not converge and the gate still stands)
+  max_rmse_kcal: 1.5            # CONFIRM THIS NUMBER. Correlation alone cannot see a constant
+                                # offset or a wrong slope; RMSE is the "can I trust one number"
+                                # metric. Both r and RMSE must pass.
   destabilizing_ddg_kcal: 1.0   # classify a variant destabilizing if FEP ddG > this (kcal/mol)
   outputs:
     ddg_map: results/ddg_map.csv       # written ONLY if the gate passes
@@ -115,7 +139,12 @@ cluster:
   scheduler: sge                 # BU SCC runs Open Grid Scheduler (SGE/OGS), NOT SLURM
   project: rise-batteries        # SGE -P flag
   conda_module: "miniconda/25.3.1"  # SCC modules are versioned (no bare `miniconda`)
-  cuda_module: "cuda/12.8"          # stay on 12.x for OpenMM CUDA-build compatibility (not 13.x)
+  gromacs_module: "gromacs/2025.3"  # the MD/FEP engine (D1 resolved: GROMACS + pmx).
+                                    # 2025.3 is the SCC default and has the best GPU
+                                    # free-energy support + the Gapsys soft-core.
+                                    # Fallback if pmx trips on it: gromacs/2021.5
+  cuda_module: ""                   # usually unnecessary -- the gromacs module pulls its own
+                                    # CUDA. Set e.g. "cuda/12.8" only if gmx reports no GPU.
   gpu_c: "7.0"                   # request GPUs by compute capability >=7.0, not by model name
   gpus_available: 8              # planning/throughput number ONLY -- not requested in a single qsub
   pe_omp: 8                      # -pe omp slots (CPU cores per task)

@@ -5,8 +5,8 @@
 # N = legs x lambda_windows x replicates (2 x 18 x 5 = 180 with the current config).
 # SGE_TASK_ID (1..N) decodes to (leg, window, replicate); the variant is passed in.
 #
-# Usage:
-#   mkdir -p logs/fep                       # -o dir must exist at submit time
+# Usage (submit from the REPO ROOT -- the job runs with -cwd, see below):
+#   cd <repo> && mkdir -p logs/fep          # -o dir must exist at submit time
 #   qsub -v VARIANT=A4V scripts/submit_array.sh
 #
 # One window == one small MD sim on ONE GPU. Parallelism is at the JOB level: the
@@ -25,6 +25,7 @@
 #$ -pe omp 8
 #$ -N sod1_fep
 #$ -j y
+#$ -cwd
 #$ -o logs/fep/
 #$ -t 1-180
 
@@ -32,7 +33,15 @@ set -euo pipefail
 
 : "${VARIANT:?set VARIANT, e.g. qsub -v VARIANT=A4V scripts/submit_array.sh}"
 
+# -cwd above runs the task in the SUBMIT directory. Without it SGE starts in $HOME and
+# every relative path here (CONFIG, results/, -o logs/fep/) silently points at the wrong
+# place -- the task then dies before it ever reaches python. Submit from the repo root.
 CONFIG="config/pipeline.yaml"
+if [[ ! -f "${CONFIG}" ]]; then
+  echo "ERROR: ${CONFIG} not found in $(pwd). Submit from the repo root:" >&2
+  echo "       cd <repo> && mkdir -p logs/fep && qsub -v VARIANT=${VARIANT} $0" >&2
+  exit 2
+fi
 
 # ---- activate the conda env FIRST so python/yaml exist for the reads below --------
 # Module names come from config (cluster.conda_module / cluster.cuda_module); override
