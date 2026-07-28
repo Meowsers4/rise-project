@@ -43,18 +43,15 @@ if [[ ! -f "${CONFIG}" ]]; then
   exit 2
 fi
 
-# ---- activate the conda env FIRST so python/yaml exist for the reads below --------
-# Module names come from config (cluster.conda_module / cluster.cuda_module); override
-# with env vars for a different SCC. Read via grep to avoid needing python pre-activate.
-# Pass FEP_MOCK=1 (e.g. `qsub -v VARIANT=A4V,FEP_MOCK=1 ...`) for a scheduler shake-out
-# that runs the synthetic window instead of the (GPU-only) Perses window.
-cfg_get() { grep -E "^[[:space:]]*$1:" "${CONFIG}" | head -1 | sed -E 's/^[^:]+:[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"//; s/"$//'; }
-CONDA_MODULE="${CONDA_MODULE:-$(cfg_get conda_module)}"
-CUDA_MODULE="${CUDA_MODULE:-$(cfg_get cuda_module)}"
-[[ -n "${CONDA_MODULE}" ]] && module load "${CONDA_MODULE}"
-[[ -n "${CUDA_MODULE}" ]] && module load "${CUDA_MODULE}"
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "${SOD1_ENV:-sod1-fep}"
+# ---- modules + conda env, from the ONE shared helper -----------------------------
+# scripts/scc_env.sh loads cluster.gromacs_prereq_modules -> cluster.gromacs_module ->
+# cluster.conda_module and activates the env, all read from config. Sourcing it here (and
+# from an interactive shell) means the batch job and your terminal cannot drift apart --
+# this script previously loaded CUDA and never GROMACS, which would have failed all 864
+# tasks identically.
+# Pass FEP_MOCK=1 (`qsub -v VARIANT=A4V,FEP_MOCK=1 ...`) for a scheduler shake-out that
+# runs the synthetic window instead of the real GPU one.
+source scripts/scc_env.sh
 echo "host=$(hostname) CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>} mock=${FEP_MOCK:-0}"
 
 # ---- read fan-out geometry from config (no hardcoded params; CLAUDE.md rule 4) --

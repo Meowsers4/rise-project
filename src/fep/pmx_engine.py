@@ -102,16 +102,23 @@ def _run(cmd: list[str], cwd: Path, stdin: str | None = None, dry_run: bool = Fa
 # --------------------------------------------------------------------------- #
 def gmx_command(cfg: dict) -> str:
     """The GROMACS binary name (``cluster.gmx_binary``; auto-detect if blank)."""
+    hint = (
+        "Load the GROMACS modules first -- from the repo root:\n"
+        "    source scripts/scc_env.sh\n"
+        "(that loads cluster.gromacs_prereq_modules then cluster.gromacs_module and "
+        "activates the conda env, all from config)."
+    )
     name = (cfg["cluster"].get("gmx_binary") or "").strip()
     if name:
-        return name
+        # Resolve even when pinned: otherwise the failure surfaces later as a bare
+        # FileNotFoundError from subprocess, which says nothing about modules.
+        if shutil.which(name):
+            return name
+        raise ToolError(f"cluster.gmx_binary={name!r} is not on PATH.\n{hint}")
     for cand in ("gmx", "gmx_mpi"):
         if shutil.which(cand):
             return cand
-    raise ToolError(
-        "no GROMACS binary found. Load the module (cluster.gromacs_module and its "
-        "gromacs_prereq_modules) or set cluster.gmx_binary."
-    )
+    raise ToolError(f"no GROMACS binary (gmx / gmx_mpi) on PATH.\n{hint}")
 
 
 def mdrun_argv(cfg: dict) -> list[str]:

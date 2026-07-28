@@ -52,6 +52,9 @@ fi
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
+# NOTE: for an interactive shell, `source scripts/scc_env.sh` does exactly the module +
+# conda setup above; this script keeps its own copy only because it must also CREATE the
+# env before there is anything to activate.
 if [[ "${1:-}" != "--gpu" ]]; then
   echo "== create env from env/environment.yml (skips if it exists) =="
   conda env list | grep -qE "\b${SOD1_ENV}\b" || conda env create -f env/environment.yml -n "${SOD1_ENV}"
