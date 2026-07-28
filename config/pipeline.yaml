@@ -83,8 +83,13 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   # --- real Perses window: integrator / ensemble / alchemy (read by src/fep/window.py) ---
   # Solvation reuses structure.solvent_padding_nm + structure.ion_conc_M (Perses solvates the
   # WT hybrid). Force field reuses structure.ff_protein + structure.water_model.
-  timestep_fs: 4.0             # 4 fs REQUIRES hydrogen_mass_amu + constraints: HBonds; set 2.0 to disable HMR
-  hydrogen_mass_amu: 3.0       # hydrogen-mass repartitioning target mass (null/0 -> disable HMR)
+  timestep_fs: 2.0             # 2 fs with h-bond constraints -- the standard pmx protocol.
+                               # 4 fs REQUIRES hydrogen-mass repartitioning, which in
+                               # GROMACS means `pdb2gmx -heavyh`; combining that with pmx's
+                               # dummy-atom masses is not something to try before a single
+                               # window has ever run. Revisit after the benchmark.
+  hydrogen_mass_amu: null      # HMR off (see above). Set with heavyh: true to enable.
+  heavyh: false                # pass -heavyh to pdb2gmx (hydrogen-mass repartitioning)
   constraints: HBonds          # HBonds | AllBonds | None  (HBonds required for 4 fs)
   collision_rate_per_ps: 1.0   # Langevin friction / thermostat coupling
   ensemble: NPT                # NPT (MonteCarloBarostat) | NVT
@@ -106,12 +111,20 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   # "auto" resolves to <pmx package>/data/mutff45 -- derived rather than hardcoded so the
   # path survives a different pmx install.
   pmx_ff_dir: auto
-  # Soft-core for the appearing/disappearing atoms. "gapsys" is the newer, better-behaved
-  # soft-core (GROMACS >= 2024); set "beutler" for the classic form on older GROMACS.
-  sc_function: gapsys
+  # Soft-core for the appearing/disappearing atoms.
+  #   beutler -- the classic form; uses sc_alpha/sc_power/sc_sigma. These exact values are
+  #              pmx's published protocol, so this is the low-risk default.
+  #   gapsys  -- newer, better behaved, GROMACS >= 2024. It takes a DIFFERENT parameter
+  #              set (sc-gapsys-*); sc_alpha/power/sigma do not apply to it, and mixing
+  #              them is a grompp error. Switch only after a window has run cleanly.
+  sc_function: beutler
   sc_alpha: 0.3
   sc_power: 1
   sc_sigma: 0.25
+  # used only when sc_function: gapsys
+  sc_gapsys_scale_linpoint_lj: 0.85
+  sc_gapsys_scale_linpoint_q: 0.3
+  sc_gapsys_sigma_lj: 0.3
   # pdb2gmx must NOT re-form the Cys57-Cys146 disulfide -- v1 is the REDUCED form
   # (README 2.1). Stage 1's fix operates on an OpenMM topology, so GROMACS needs its own
   # guard: pdb2gmx is told every cysteine is a free thiol.
@@ -171,11 +184,12 @@ cluster:
   scheduler: sge                 # BU SCC runs Open Grid Scheduler (SGE/OGS), NOT SLURM
   project: rise-batteries        # SGE -P flag
   conda_module: "miniconda/25.3.1"  # SCC modules are versioned (no bare `miniconda`)
-  lmod_init: ""                     # Lmod init script, tried FIRST by scc_env.sh. Leave
-                                    # empty to auto-discover; set it if a non-interactive
-                                    # shell (qrsh ... bash -lc) reports "module: command
-                                    # not found". On the SCC it is $LMOD_PKG/init/bash,
-                                    # e.g. /usr/local/lmod/8.7.12/init/bash.
+  # PINNED, do not auto-discover: /usr/local/lmod also contains a stale 7.8 tree whose
+  # init script points at a libexec/lmod that no longer exists, and it sorts BEFORE
+  # 8.7.12 in a glob. 8.7.12 is the version $LMOD_PKG reports in a working login shell.
+  # Needed because /etc/profile.d skips Lmod setup in non-interactive shells
+  # (qrsh ... bash -lc), which is exactly how the batch jobs run.
+  lmod_init: "/usr/local/lmod/8.7.12/init/bash"
   gromacs_module: ""                # deliberately EMPTY: `module load gromacs/2025.3`
                                     # selects the CPU-only install_mpi_avx2 build. We use
                                     # the CUDA tree instead, via cluster.gmx_gmxrc below.

@@ -382,6 +382,10 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
 
     n_sg = _count_cys_pairs(sys_dir / "wt.pdb") if not dry_run else 4
     ss_answers = _pdb2gmx_stdin(cfg, n_sg)
+    # Hydrogen-mass repartitioning is a pdb2gmx flag in GROMACS, not an .mdp setting.
+    # Off by default: a >2 fs timestep needs it, but combining it with pmx's dummy-atom
+    # masses is untested here (fep.heavyh).
+    heavyh = ["-heavyh"] if fcfg.get("heavyh") else []
 
     # 1. pdb2gmx FIRST, on the wild type. `pmx mutate -h`: "The best way to use this
     #    script is to take a pdb/gro file that has been written with pdb2gmx with all
@@ -389,7 +393,7 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
     #    zero residues and die in make_chains(). This pass only normalises naming and
     #    hydrogens to the pmx force field; its topology is discarded.
     _run([gmx, "pdb2gmx", "-f", "wt.pdb", "-o", "wt_gmx.pdb", "-p", "wt_discard.top",
-          "-ff", ff, "-water", water, "-ignh", "-ss"],
+          "-ff", ff, "-water", water, "-ignh", "-ss", *heavyh],
          cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
 
     # 2. pmx mutate on the pdb2gmx output. The resid is read from THAT file: pdb2gmx and
@@ -404,7 +408,7 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
 
     # 3. pdb2gmx again, now on the hybrid -- this is the topology we keep.
     _run([gmx, "pdb2gmx", "-f", "hybrid.pdb", "-o", "conf.gro", "-p", "topol.top",
-          "-ff", ff, "-water", water, "-ignh", "-ss"],
+          "-ff", ff, "-water", water, "-ignh", "-ss", *heavyh],
          cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
 
     # 4. pmx gentop -- write the B-state (mutant) parameters into the topology.
@@ -519,7 +523,7 @@ def production_mdp(cfg: dict, window: int, seed: int, smoke: bool = False) -> st
         ]
     lines += [
         "",
-        "; --- constraints (4 fs needs h-bonds constrained + HMR applied in the topology) ---",
+        "; --- constraints (>2 fs additionally needs HMR via pdb2gmx -heavyh; see fep.heavyh) ---",
         f"constraints              = {'h-bonds' if fcfg['constraints'] == 'HBonds' else 'none'}",
         "constraint-algorithm     = lincs",
         "lincs-order              = 6",
@@ -531,11 +535,30 @@ def production_mdp(cfg: dict, window: int, seed: int, smoke: bool = False) -> st
         f"calc-lambda-neighbors    = -1",   # energies at ALL states -> u_kn for MBAR
         f"nstdhdl                  = {nstdhdl}",
         "dhdl-print-energy        = total",
-        f"sc-function              = {fcfg['sc_function']}",
-        f"sc-alpha                 = {fcfg['sc_alpha']}",
-        f"sc-power                 = {fcfg['sc_power']}",
-        f"sc-sigma                 = {fcfg['sc_sigma']}",
-        "couple-intramol           = no",
+    ]
+    # The two soft-core forms take DIFFERENT parameters. Beutler uses sc-alpha/power/sigma;
+    # gapsys uses the sc-gapsys-* set and ignores (or rejects) the Beutler ones. Emitting
+    # both is a grompp error, so pick one.
+    sc = str(fcfg["sc_function"]).lower()
+    if sc == "gapsys":
+        lines += [
+            "sc-function              = gapsys",
+            f"sc-gapsys-scale-linpoint-lj = {fcfg['sc_gapsys_scale_linpoint_lj']}",
+            f"sc-gapsys-scale-linpoint-q  = {fcfg['sc_gapsys_scale_linpoint_q']}",
+            f"sc-gapsys-sigma-lj          = {fcfg['sc_gapsys_sigma_lj']}",
+        ]
+    elif sc == "beutler":
+        lines += [
+            "sc-function              = beutler",
+            f"sc-alpha                 = {fcfg['sc_alpha']}",
+            f"sc-power                 = {fcfg['sc_power']}",
+            f"sc-sigma                 = {fcfg['sc_sigma']}",
+        ]
+    else:
+        raise ValueError(f"fep.sc_function={sc!r} -- expected 'beutler' or 'gapsys'")
+    # NOTE: no couple-moltype here (we perturb a residue in place, we do not decouple a
+    # whole molecule), so couple-intramol would be meaningless -- grompp warns on it.
+    lines += [
         "",
         f"; equilibration steps discarded downstream: {equil_steps}",
         "",
