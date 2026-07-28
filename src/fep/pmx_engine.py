@@ -256,22 +256,81 @@ def _count_cys_pairs(pdb: Path) -> int:
                if line.startswith(("ATOM", "HETATM")) and line[12:16].strip() == "SG")
 
 
-def write_mutation_script(cfg: dict, variant: str, path: Path,
+_CAPS = frozenset({"ACE", "NME", "NAC", "NH2"})
+_NON_PROTEIN = frozenset({"HOH", "WAT", "SOL", "NA", "CL", "CU", "ZN"})
+
+
+def _protein_residues(pdb: Path) -> list[tuple[int, str]]:
+    """[(resSeq, resname)] for protein residues in file order, caps and solvent dropped."""
+    seen: dict[int, str] = {}
+    for line in pdb.read_text().splitlines():
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        name = line[17:20].strip()
+        if name in _CAPS or name in _NON_PROTEIN:
+            continue
+        seen.setdefault(int(line[22:26]), name)
+    return list(seen.items())
+
+
+def mutation_resid(cfg: dict, variant: str, pdb: Path, leg: str) -> int:
+    """Residue id pmx must mutate, READ FROM the structure pmx will actually parse.
+
+    The two legs number residues differently and neither can be assumed:
+
+    * **folded** -- the protein keeps mature numbering, so the panel's ``mature_pos`` is
+      the id; we still verify the residue there is the expected wild type.
+    * **unfolded** -- the capped tripeptide is renumbered by PDBFixer/pdb2gmx (ACE-X-Y-Z-NME
+      becomes 1..5), so the mutation site is the MIDDLE protein residue, not ``mature_pos``.
+      Using mature_pos here silently mutates a neighbour and yields a plausible, wrong ΔΔG.
+
+    Raises:
+        ValueError: If the residue found is not the panel's wild type -- the guard that
+            makes a numbering mistake loud instead of silent.
+    """
+    from src.prep.build import _THREE
+
+    record = load_variant_record(ROOT / cfg["panel"]["csv"], variant)
+    want = _THREE[record["wt_aa"]]
+    residues = _protein_residues(pdb)
+    if not residues:
+        raise ValueError(f"{pdb}: no protein residues parsed")
+
+    if leg == "folded":
+        resid = int(record["mature_pos"])
+        got = dict(residues).get(resid)
+    elif leg == "unfolded":
+        if len(residues) != 3:
+            raise ValueError(
+                f"{pdb}: unfolded reference has {len(residues)} protein residues, "
+                "expected the 3 of a capped tripeptide."
+            )
+        resid, got = residues[1]            # the middle residue is the mutation site
+    else:
+        raise ValueError(f"unknown leg {leg!r}")
+
+    if got != want:
+        raise ValueError(
+            f"{pdb}: residue {resid} is {got!r}, panel says {want!r} "
+            f"({record['variant']}). Refusing to mutate the wrong residue."
+        )
+    return resid
+
+
+def write_mutation_script(cfg: dict, variant: str, pdb: Path, leg: str, path: Path,
                           dry_run: bool = False) -> str:
-    """Write pmx's ``--script`` file: one ``"<resid> <target>"`` pair per mutation.
+    """Write pmx's ``-script`` file: one ``"<resid> <target>"`` pair.
 
     ``pmx mutate -h``: *"The script file simply has to consist of 'resi_number
-    target_residue.' pairs"*, using an extended one-letter amino-acid code. We emit a
-    single line, since v1 is one point mutation per transformation.
-
-    The residue id is the MATURE position straight from the panel -- the same number
-    ``prep.build.assert_wt_residue`` has already proven addresses the wild-type residue
-    the panel claims, so pmx cannot silently mutate a different site.
+    target_residue.' pairs"*, in an extended one-letter code. One line, since v1 is a
+    single point mutation. The resid comes from :func:`mutation_resid`, i.e. from the
+    actual file, never assumed.
     """
     record = load_variant_record(ROOT / cfg["panel"]["csv"], variant)
-    line = f"{int(record['mature_pos'])} {record['mut_aa']}\n"
-    _log(f"mutation script: {line.strip()!r}  ({record['wt_aa']}"
-         f"{record['mature_pos']}{record['mut_aa']})")
+    resid = int(record["mature_pos"]) if dry_run else mutation_resid(cfg, variant, pdb, leg)
+    line = f"{resid} {record['mut_aa']}\n"
+    _log(f"mutation script ({leg}): {line.strip()!r} -- {record['wt_aa']}"
+         f"{record['mature_pos']}{record['mut_aa']} is residue {resid} in {pdb.name}")
     if not dry_run:
         path.write_text(line)
     return line
@@ -309,21 +368,34 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
     # Deterministic ion placement: same system for every window/replicate of this leg.
     seed = stable_seed(variant, leg, "system")
 
-    # 1. pmx mutate -- introduce the hybrid residue at the mature position.
-    #    pmx wants the mutation in a script file ("<resid> <target>"), written here.
-    write_mutation_script(cfg, variant, sys_dir / "mutation.txt", dry_run=dry_run)
+    n_sg = _count_cys_pairs(sys_dir / "wt.pdb") if not dry_run else 4
+    ss_answers = _pdb2gmx_stdin(cfg, n_sg)
+
+    # 1. pdb2gmx FIRST, on the wild type. `pmx mutate -h`: "The best way to use this
+    #    script is to take a pdb/gro file that has been written with pdb2gmx with all
+    #    hydrogen atoms present." Feeding it a raw PDBFixer file makes pmx's reader parse
+    #    zero residues and die in make_chains(). This pass only normalises naming and
+    #    hydrogens to the pmx force field; its topology is discarded.
+    _run([gmx, "pdb2gmx", "-f", "wt.pdb", "-o", "wt_gmx.pdb", "-p", "wt_discard.top",
+          "-ff", ff, "-water", water, "-ignh", "-ss"],
+         cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
+
+    # 2. pmx mutate on the pdb2gmx output. The resid is read from THAT file: pdb2gmx and
+    #    PDBFixer renumber, so for the tripeptide the site is the middle residue, not
+    #    mature_pos (mutation_resid also verifies the wild-type identity there).
+    write_mutation_script(cfg, variant, sys_dir / "wt_gmx.pdb", leg,
+                          sys_dir / "mutation.txt", dry_run=dry_run)
     _run([*pmx_argv(cfg, "mutate"),
-          "-f", "wt.pdb", "-o", "hybrid.pdb", "-ff", ff,
+          "-f", "wt_gmx.pdb", "-o", "hybrid.pdb", "-ff", ff,
           "-script", "mutation.txt"],
          cwd=sys_dir, dry_run=dry_run)
 
-    # 2. pdb2gmx under the pmx mutation force field; -ignh so hydrogens follow this FF.
-    n_sg = _count_cys_pairs(sys_dir / "wt.pdb") if not dry_run else 4
+    # 3. pdb2gmx again, now on the hybrid -- this is the topology we keep.
     _run([gmx, "pdb2gmx", "-f", "hybrid.pdb", "-o", "conf.gro", "-p", "topol.top",
           "-ff", ff, "-water", water, "-ignh", "-ss"],
-         cwd=sys_dir, stdin=_pdb2gmx_stdin(cfg, n_sg), dry_run=dry_run)
+         cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
 
-    # 3. pmx gentop -- write the B-state (mutant) parameters into the topology.
+    # 4. pmx gentop -- write the B-state (mutant) parameters into the topology.
     _run([*pmx_argv(cfg, "gentop"),
           "-p", "topol.top", "-o", "hybrid.top", "-ff", ff],
          cwd=sys_dir, dry_run=dry_run)
