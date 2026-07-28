@@ -69,9 +69,34 @@ def mock_window(variant: str, leg: str, window: int, rep: int, n_states: int) ->
 
 
 def _perses_window(cfg, variant, leg, window, rep, smoke=False):  # pragma: no cover
-    """Real GPU window -- delegates to :mod:`src.fep.perses_engine` (SCC-only imports)."""
+    """OpenMM+Perses window -- :mod:`src.fep.perses_engine` (SCC-only imports)."""
     from src.fep.perses_engine import run_perses_window
     return run_perses_window(cfg, variant, leg, window, rep, smoke=smoke)
+
+
+def _pmx_window(cfg, variant, leg, window, rep, smoke=False):  # pragma: no cover
+    """GROMACS+pmx window -- :mod:`src.fep.pmx_engine` (SCC-only imports)."""
+    from src.fep.pmx_engine import run_pmx_window
+    return run_pmx_window(cfg, variant, leg, window, rep, smoke=smoke)
+
+
+# fep.framework -> engine. Explicit map so an unknown framework fails loudly rather than
+# silently running the wrong engine (CLAUDE.md #4).
+_ENGINES = {
+    "gromacs_pmx": _pmx_window,
+    "openmm_perses": _perses_window,
+}
+
+
+def _real_window(cfg, variant, leg, window, rep, smoke=False):  # pragma: no cover
+    framework = cfg["fep"]["framework"]
+    try:
+        engine = _ENGINES[framework]
+    except KeyError:
+        raise KeyError(
+            f"fep.framework={framework!r} has no engine. Known: {sorted(_ENGINES)}."
+        ) from None
+    return engine(cfg, variant, leg, window, rep, smoke=smoke)
 
 
 def run_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
@@ -81,7 +106,7 @@ def run_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     if os.environ.get("FEP_MOCK"):
         data = mock_window(variant, leg, window, rep, n_states)
     else:
-        data = _perses_window(cfg, variant, leg, window, rep, smoke=smoke)
+        data = _real_window(cfg, variant, leg, window, rep, smoke=smoke)
     # A window without provenance cannot be told apart from a hand-written file.
     data.setdefault("provenance", MOCK_PROVENANCE if os.environ.get("FEP_MOCK")
                     else cfg["fep"]["framework"])

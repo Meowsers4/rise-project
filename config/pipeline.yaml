@@ -21,8 +21,16 @@ structure:
   fallback_pdb: 2C9V        # 1.07 Å metallated; strip metals + re-equilibrate IF apo loop rebuild is unstable
   default_oligomer: monomer # monomer | dimer -- per-variant override in variants.csv
   interface_cutoff_A: 5.0   # residue -> dimer if any heavy atom within this of the partner monomer (Stage 0)
-  water_model: tip3p
-  ff_protein: amber14sb     # or charmm36m if using GROMACS+CHARMM
+  water_model: tip3p        # pmx's mutff ships tip3p.itp/.gro -- keep tip3p
+  ff_protein: amber99sb     # FORCED BY pmx: the installed pmx (py3 branch) ships mutation
+                            # parameters for amber99sb ONLY (pmx/data/mutff contains
+                            # ffamber99sb.{rtp,itp,mtp,hdb,atp} + the n/c .tdb files; there is
+                            # no amber14sb, no *-ILDN and no CHARMM set). The alchemical
+                            # mutation must use a force field pmx has hybrid parameters for,
+                            # so the whole Stage 3 system is amber99sb + tip3p.
+                            # Stage 1 prep is unaffected: for the FEP path it only emits
+                            # coordinates (solvate=False, no force field constructed), and
+                            # pdb2gmx rebuilds hydrogens under the pmx force field anyway.
   ion_conc_M: 0.15
   ph: 7.0                   # Stage 1 protonation pH (PDBFixer addMissingHydrogens)
   solvent_padding_nm: 1.0   # min solute-box padding for Modeller.addSolvent
@@ -52,7 +60,11 @@ prescreen:                  # Stage 2 — cheap empirical ddG (CPU)
   # Both methods report positive = destabilizing, matching validation.ddg_sign.
 
 fep:                        # Stage 3 — the cluster workhorse (GPU)
-  framework: openmm_perses  # openmm_perses | gromacs_pmx | amber_ti  (resolved: OpenMM+Perses)
+  framework: gromacs_pmx    # openmm_perses | gromacs_pmx | amber_ti
+                            # D1 REVISED 2026-07-27: GROMACS + pmx. pmx was built for
+                            # protein mutation FEP, needs no OpenEye, and its workflow is
+                            # file-based rather than depending on perses' version-drifty
+                            # lower-level API. Also the provenance tag on every result.
   lambda_windows: 18        # 12 | 18 | 24  -- cost vs precision.
                             # KEEP 18: windows run independently (no replica exchange), so
                             # neighbour overlap comes from window density alone. Cutting to
@@ -84,7 +96,19 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   decorrelate: true            # subsample to statistically independent frames (pymbar.timeseries)
                                # before MBAR. Correlated frames make MBAR's error bar look
                                # ~sqrt(g) times smaller than it is; g is the correlation time.
-  lambda_protocol: default     # Perses LambdaProtocol name (resolved: validated default schedule)
+  # --- GROMACS + pmx specifics (read by src/fep/pmx_engine.py) ---
+  pmx_forcefield: amber99sb     # name pmx/pdb2gmx use; must exist in pmx/data/mutff
+  # Soft-core for the appearing/disappearing atoms. "gapsys" is the newer, better-behaved
+  # soft-core (GROMACS >= 2024); set "beutler" for the classic form on older GROMACS.
+  sc_function: gapsys
+  sc_alpha: 0.3
+  sc_power: 1
+  sc_sigma: 0.25
+  # pdb2gmx must NOT re-form the Cys57-Cys146 disulfide -- v1 is the REDUCED form
+  # (README 2.1). Stage 1's fix operates on an OpenMM topology, so GROMACS needs its own
+  # guard: pdb2gmx is told every cysteine is a free thiol.
+  keep_disulfide_reduced: true
+  lambda_protocol: default     # unused by the GROMACS path (kept for the perses engine)
   unfolded_reference: tripeptide_native  # ACE-[i-1][i][i+1]-NME, neighbors from the WT structure
   checkpoint_interval_steps: 50000       # write resumable checkpoint every N production steps (CLAUDE.md)
   convergence:
