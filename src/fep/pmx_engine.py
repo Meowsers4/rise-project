@@ -121,10 +121,19 @@ def gmx_command(cfg: dict) -> str:
     raise ToolError(f"no GROMACS binary (gmx / gmx_mpi) on PATH.\n{hint}")
 
 
-def mdrun_argv(cfg: dict) -> list[str]:
-    """argv prefix for mdrun: launcher + binary (MPI build => runs under mpirun)."""
-    launcher = (cfg["cluster"].get("mdrun_launcher") or "").split()
-    return [*launcher, gmx_command(cfg), "mdrun"]
+def mdrun_argv(cfg: dict, gpu: bool = True) -> list[str]:
+    """argv prefix for mdrun: optional launcher, binary, thread count, GPU offload.
+
+    ``cluster.mdrun_launcher`` is empty for the SCC's serial CUDA build (no MPI, no
+    thread-MPI) and would be ``mpirun -np 1`` for the MPI build. ``gpu=False`` drops the
+    offload flags for CPU-only steps such as minimisation.
+    """
+    ccfg = cfg["cluster"]
+    argv = [*(ccfg.get("mdrun_launcher") or "").split(), gmx_command(cfg), "mdrun",
+            "-ntomp", str(ccfg["mdrun_ntomp"])]
+    if gpu:
+        argv += (ccfg.get("mdrun_gpu_flags") or "").split()
+    return argv
 
 
 def pmx_argv(cfg: dict, subcommand: str) -> list[str]:
@@ -225,6 +234,27 @@ def _count_cys_pairs(pdb: Path) -> int:
                if line.startswith(("ATOM", "HETATM")) and line[12:16].strip() == "SG")
 
 
+def write_mutation_script(cfg: dict, variant: str, path: Path,
+                          dry_run: bool = False) -> str:
+    """Write pmx's ``--script`` file: one ``"<resid> <target>"`` pair per mutation.
+
+    ``pmx mutate -h``: *"The script file simply has to consist of 'resi_number
+    target_residue.' pairs"*, using an extended one-letter amino-acid code. We emit a
+    single line, since v1 is one point mutation per transformation.
+
+    The residue id is the MATURE position straight from the panel -- the same number
+    ``prep.build.assert_wt_residue`` has already proven addresses the wild-type residue
+    the panel claims, so pmx cannot silently mutate a different site.
+    """
+    record = load_variant_record(ROOT / cfg["panel"]["csv"], variant)
+    line = f"{int(record['mature_pos'])} {record['mut_aa']}\n"
+    _log(f"mutation script: {line.strip()!r}  ({record['wt_aa']}"
+         f"{record['mature_pos']}{record['mut_aa']})")
+    if not dry_run:
+        path.write_text(line)
+    return line
+
+
 def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Path:
     """Build (once) the solvated, minimised hybrid system for ``variant``/``leg``.
 
@@ -254,9 +284,11 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
     seed = stable_seed(variant, leg, "system")
 
     # 1. pmx mutate -- introduce the hybrid residue at the mature position.
+    #    pmx wants the mutation in a script file ("<resid> <target>"), written here.
+    write_mutation_script(cfg, variant, sys_dir / "mutation.txt", dry_run=dry_run)
     _run([*pmx_argv(cfg, "mutate"),
-          "-f", "wt.pdb", "-o", "hybrid.pdb", "--ff", ff,
-          "--script", "mutation.txt"],
+          "-f", "wt.pdb", "-o", "hybrid.pdb", "-ff", ff,
+          "-script", "mutation.txt"],
          cwd=sys_dir, dry_run=dry_run)
 
     # 2. pdb2gmx under the pmx mutation force field; -ignh so hydrogens follow this FF.
@@ -267,7 +299,7 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
 
     # 3. pmx gentop -- write the B-state (mutant) parameters into the topology.
     _run([*pmx_argv(cfg, "gentop"),
-          "-p", "topol.top", "-o", "hybrid.top", "--ff", ff],
+          "-p", "topol.top", "-o", "hybrid.top", "-ff", ff],
          cwd=sys_dir, dry_run=dry_run)
 
     # 4. box, solvent, neutralising ions at the configured ionic strength.
@@ -288,8 +320,7 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
     _write_mdp(sys_dir / "em.mdp", _minim_mdp(cfg), dry_run=dry_run)
     _run([gmx, "grompp", "-f", "em.mdp", "-c", "ions.gro", "-p", "hybrid.top",
           "-o", "em.tpr", "-maxwarn", "2"], cwd=sys_dir, dry_run=dry_run)
-    _run([*mdrun_argv(cfg), "-deffnm", "em", "-ntomp", str(cfg["cluster"]["mdrun_ntomp"])],
-         cwd=sys_dir, dry_run=dry_run)
+    _run([*mdrun_argv(cfg, gpu=False), "-deffnm", "em"], cwd=sys_dir, dry_run=dry_run)
 
     if not dry_run:
         (sys_dir / _DONE_MARKER).write_text(
@@ -457,7 +488,6 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
 
     # -cpi/-cpo: GROMACS resumes from its own checkpoint if the job was killed (CLAUDE.md).
     _run([*mdrun_argv(cfg), "-deffnm", "prod",
-          "-ntomp", str(cfg["cluster"]["mdrun_ntomp"]),
           "-cpi", "prod.cpt", "-cpo", "prod.cpt", "-append",
           "-dhdl", "dhdl.xvg"], cwd=run_dir, dry_run=dry_run)
 

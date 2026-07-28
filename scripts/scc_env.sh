@@ -60,6 +60,17 @@ fi
 # Repo root on PYTHONPATH so `python -m src.fep.window` works from anywhere.
 export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
 
+# A specific GROMACS build (e.g. the CUDA tree, which the module does NOT put on PATH)
+# is selected by sourcing its GMXRC -- that sets PATH/LD_LIBRARY_PATH for that install.
+GMX_GMXRC="${GMX_GMXRC:-$(_scc_cfg gmx_gmxrc)}"
+if [[ -n "${GMX_GMXRC}" ]]; then
+  if [[ -f "${GMX_GMXRC}" ]]; then
+    source "${GMX_GMXRC}" || echo "WARN: sourcing ${GMX_GMXRC} failed" >&2
+  else
+    echo "WARN: cluster.gmx_gmxrc=${GMX_GMXRC} not found" >&2
+  fi
+fi
+
 if [[ -z "${GMX}" ]]; then
   for _c in gmx gmx_mpi; do
     if command -v "${_c}" >/dev/null 2>&1; then GMX="${_c}"; break; fi
