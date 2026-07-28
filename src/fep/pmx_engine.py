@@ -147,6 +147,24 @@ def pmx_argv(cfg: dict, subcommand: str) -> list[str]:
     return [sys.executable, "-m", f"pmx.scripts.{subcommand}"]
 
 
+def pmx_ff_dir(cfg: dict) -> Path:
+    """Directory holding pmx's ``<name>.ff`` mutation force fields.
+
+    ``fep.pmx_ff_dir: auto`` derives it from the installed pmx package rather than
+    hardcoding a site path, so the config survives a different pmx location.
+    """
+    configured = str(cfg["fep"].get("pmx_ff_dir", "auto")).strip()
+    if configured and configured != "auto":
+        return Path(configured)
+    import pmx
+    return Path(pmx.__file__).parent / "data" / "mutff45"
+
+
+def gmx_env(cfg: dict) -> dict:
+    """Environment additions for GROMACS: GMXLIB so pdb2gmx sees pmx's force fields."""
+    return {"GMXLIB": str(pmx_ff_dir(cfg))}
+
+
 def verify_tools(cfg: dict) -> dict:
     """Check GROMACS and pmx are callable and the mutation force field exists.
 
@@ -163,16 +181,20 @@ def verify_tools(cfg: dict) -> dict:
 
     import pmx  # noqa: F401  -- import error here is the answer
     ff = cfg["fep"]["pmx_forcefield"]
-    mutff = Path(pmx.__file__).parent / "data" / "mutff"
-    rtp = mutff / f"ff{ff}.rtp"
-    if not rtp.exists():
+    ff_dir = pmx_ff_dir(cfg)
+    if not ff_dir.is_dir():
+        raise ToolError(f"fep.pmx_ff_dir resolves to {ff_dir}, which does not exist.")
+    available = sorted(p.name[:-3] for p in ff_dir.glob("*.ff"))
+    if ff not in available:
         raise ToolError(
-            f"pmx has no mutation parameters for {ff!r}: {rtp} missing. Available: "
-            f"{sorted(p.name for p in mutff.glob('ff*.rtp'))}. "
-            "Set fep.pmx_forcefield to one pmx actually ships."
+            f"pmx has no mutation force field {ff!r} in {ff_dir}. Available: {available}. "
+            "Set fep.pmx_forcefield to one of those."
         )
-    found["pmx_mutff"] = str(mutff)
+    # pdb2gmx must ALSO resolve this force field, which it only does via GMXLIB.
+    found["pmx_ff_dir"] = str(ff_dir)
     found["forcefield"] = ff
+    found["available_ff"] = ", ".join(available)
+    found["GMXLIB"] = gmx_env(cfg)["GMXLIB"]
     return found
 
 
@@ -272,6 +294,10 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
         _log(f"discarding incomplete system dir {sys_dir}")
         shutil.rmtree(sys_dir)
     sys_dir.mkdir(parents=True, exist_ok=True)
+
+    # GMXLIB must be visible to every gmx/pmx child process, or pdb2gmx cannot resolve
+    # the pmx force field. One process per window, so setting it here is contained.
+    os.environ.update(gmx_env(cfg))
 
     record = load_variant_record(ROOT / cfg["panel"]["csv"], variant)
     gmx = gmx_command(cfg)

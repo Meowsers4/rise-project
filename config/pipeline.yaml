@@ -97,7 +97,14 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
                                # before MBAR. Correlated frames make MBAR's error bar look
                                # ~sqrt(g) times smaller than it is; g is the correlation time.
   # --- GROMACS + pmx specifics (read by src/fep/pmx_engine.py) ---
-  pmx_forcefield: amber99sb     # name pmx/pdb2gmx use; must exist in pmx/data/mutff
+  # Name pmx AND pdb2gmx use; must be a <name>.ff directory inside pmx_ff_dir.
+  # Available in this pmx: amber99sbmut, amber99sb-star-ildn-mut, charmm22starmut,
+  # oplsaamut (pmx/data/mutff45/). amber99sb*-ILDN is the one pmx's own benchmarks used.
+  pmx_forcefield: amber99sb-star-ildn-mut
+  # Directory holding the .ff force fields; exported as GMXLIB so pdb2gmx can find them.
+  # "auto" resolves to <pmx package>/data/mutff45 -- derived rather than hardcoded so the
+  # path survives a different pmx install.
+  pmx_ff_dir: auto
   # Soft-core for the appearing/disappearing atoms. "gapsys" is the newer, better-behaved
   # soft-core (GROMACS >= 2024); set "beutler" for the classic form on older GROMACS.
   sc_function: gapsys
@@ -163,14 +170,13 @@ cluster:
   scheduler: sge                 # BU SCC runs Open Grid Scheduler (SGE/OGS), NOT SLURM
   project: rise-batteries        # SGE -P flag
   conda_module: "miniconda/25.3.1"  # SCC modules are versioned (no bare `miniconda`)
-  gromacs_module: "gromacs/2025.3"  # the MD/FEP engine (D1 resolved: GROMACS + pmx).
-                                    # 2025.3 is the SCC default and has the best GPU
-                                    # free-energy support + the Gapsys soft-core.
-                                    # Fallback if pmx trips on it: gromacs/2021.5
-  # Lmod prerequisites, loaded IN ORDER before gromacs_module. Space-separated (the
-  # setup/submit scripts read this with grep before python exists). The SCC's 2025.3 is
-  # an OpenMPI build and Lmod refuses to load it without this.
-  gromacs_prereq_modules: "openmpi/4.1.5_gnu-12.2.0"
+  gromacs_module: ""                # deliberately EMPTY: `module load gromacs/2025.3`
+                                    # selects the CPU-only install_mpi_avx2 build. We use
+                                    # the CUDA tree instead, via cluster.gmx_gmxrc below.
+  # Modules the CUDA build needs at RUNTIME (it links MKL for FFT and CUDA 12.8), loaded
+  # in order. Space-separated: the setup/submit scripts read this with grep, before python
+  # exists. Confirmed working: gmx --version reports "GPU support: CUDA".
+  gromacs_prereq_modules: "cuda/12.8 intel/2024.0 gcc/12.2.0"
   # The gromacs/2025.3 module puts the CPU-ONLY build (install_mpi_avx2) on PATH --
   # `gmx_mpi --version` reports "GPU support: disabled". The CUDA build is a separate
   # tree in the same package. Point at it explicitly.

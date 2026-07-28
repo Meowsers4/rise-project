@@ -60,6 +60,14 @@ fi
 # Repo root on PYTHONPATH so `python -m src.fep.window` works from anywhere.
 export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
 
+# GMXLIB: pdb2gmx only finds pmx's mutation force fields if this points at the directory
+# holding them. Derived from the installed pmx so it follows the env, not a hardcoded
+# path (the engine sets this too; exporting it here makes interactive gmx calls work).
+if python -c "import pmx" >/dev/null 2>&1; then
+  GMXLIB="$(python -c "import pmx, os; print(os.path.join(os.path.dirname(pmx.__file__), 'data', 'mutff45'))" 2>/dev/null)"
+  if [[ -d "${GMXLIB}" ]]; then export GMXLIB; else unset GMXLIB; fi
+fi
+
 # A specific GROMACS build (e.g. the CUDA tree, which the module does NOT put on PATH)
 # is selected by sourcing its GMXRC -- that sets PATH/LD_LIBRARY_PATH for that install.
 GMX_GMXRC="${GMX_GMXRC:-$(_scc_cfg gmx_gmxrc)}"
