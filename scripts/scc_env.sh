@@ -37,37 +37,50 @@ SOD1_ENV="${SOD1_ENV:-sod1-fep}"
 # it, and then every `module load` silently no-ops and GROMACS later dies with
 # "error while loading shared libraries: libmkl_core.so.2". Bootstrap it explicitly.
 if ! type module >/dev/null 2>&1; then
-  for _init in /etc/profile.d/lmod.sh /etc/profile.d/modules.sh \
-               "${LMOD_PKG:-}/init/bash" /usr/share/lmod/lmod/init/bash \
-               /usr/local/lmod/lmod/init/bash /share/module.8/lmod/lmod/init/bash; do
+  # NOTE the globs: the SCC's Lmod lives in a VERSIONED directory
+  # (LMOD_PKG=/usr/local/lmod/8.7.12), and LMOD_PKG itself is not exported into the
+  # qrsh shell -- so both a bare .../lmod/init/bash and "${LMOD_PKG}/init/bash" miss it.
+  # cluster.lmod_init pins the path if this discovery ever fails.
+  for _init in "$(_scc_cfg lmod_init)" \
+               "${LMOD_PKG:-/nonexistent}/init/bash" \
+               /etc/profile.d/lmod.sh /etc/profile.d/modules.sh \
+               /usr/local/lmod/*/init/bash /usr/share/lmod/*/init/bash \
+               /share/module.8/lmod/*/init/bash; do
     if [[ -n "${_init}" && -f "${_init}" ]]; then
       # shellcheck disable=SC1090
-      source "${_init}" && break
+      if source "${_init}" 2>/dev/null && type module >/dev/null 2>&1; then
+        echo "scc_env.sh: bootstrapped Lmod from ${_init}" >&2
+        break
+      fi
     fi
   done
 fi
+
+_have_module=1
 if ! type module >/dev/null 2>&1; then
-  echo "ERROR: Lmod's 'module' command is unavailable in this shell, so no modules can" >&2
-  echo "       be loaded and GROMACS will fail on missing MKL/CUDA libraries." >&2
-  echo "       Run from an interactive session, or tell me which init script your" >&2
-  echo "       login shell sources (grep -l lmod /etc/profile.d/*)." >&2
+  _have_module=0
+  echo "ERROR: Lmod's 'module' command is unavailable and could not be bootstrapped." >&2
+  echo "       Nothing will load and GROMACS will fail on missing MKL/CUDA libraries." >&2
+  echo "       Set cluster.lmod_init in config/pipeline.yaml to your Lmod init script" >&2
+  echo "       (look for \$LMOD_PKG/init/bash in a login shell), or run interactively." >&2
 fi
 
 # if-statements rather than `[[ ... ]] && cmd`: this file is sourced by scripts running
 # under `set -e`, where a false test at the head of an && list can abort the caller.
-if [[ -n "${CONDA_MODULE}" ]]; then
-  module load "${CONDA_MODULE}" || echo "WARN: module load ${CONDA_MODULE} failed" >&2
-fi
-# Prerequisites BEFORE gromacs: the SCC's gromacs/2025.3 is an OpenMPI build and Lmod
-# refuses to load it otherwise.
-for _m in ${GROMACS_PREREQ}; do
-  module load "${_m}" || echo "WARN: module load ${_m} failed" >&2
-done
-if [[ -n "${GROMACS_MODULE}" ]]; then
-  module load "${GROMACS_MODULE}" || echo "WARN: module load ${GROMACS_MODULE} failed" >&2
-fi
-if [[ -n "${CUDA_MODULE}" ]]; then
-  module load "${CUDA_MODULE}" || echo "WARN: module load ${CUDA_MODULE} failed" >&2
+if [[ "${_have_module}" == "1" ]]; then
+  if [[ -n "${CONDA_MODULE}" ]]; then
+    module load "${CONDA_MODULE}" || echo "WARN: module load ${CONDA_MODULE} failed" >&2
+  fi
+  # Runtime prerequisites for the CUDA GROMACS build (MKL via intel, CUDA, gcc), in order.
+  for _m in ${GROMACS_PREREQ}; do
+    module load "${_m}" || echo "WARN: module load ${_m} failed" >&2
+  done
+  if [[ -n "${GROMACS_MODULE}" ]]; then
+    module load "${GROMACS_MODULE}" || echo "WARN: module load ${GROMACS_MODULE} failed" >&2
+  fi
+  if [[ -n "${CUDA_MODULE}" ]]; then
+    module load "${CUDA_MODULE}" || echo "WARN: module load ${CUDA_MODULE} failed" >&2
+  fi
 fi
 
 if [[ -n "${CONDA_MODULE}" ]]; then
