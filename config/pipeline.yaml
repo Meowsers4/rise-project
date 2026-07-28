@@ -22,14 +22,15 @@ structure:
   default_oligomer: monomer # monomer | dimer -- per-variant override in variants.csv
   interface_cutoff_A: 5.0   # residue -> dimer if any heavy atom within this of the partner monomer (Stage 0)
   water_model: tip3p        # pmx's mutff ships tip3p.itp/.gro -- keep tip3p
-  ff_protein: amber99sb     # FORCED BY pmx: the installed pmx (py3 branch) ships mutation
-                            # parameters for amber99sb ONLY (pmx/data/mutff contains
-                            # ffamber99sb.{rtp,itp,mtp,hdb,atp} + the n/c .tdb files; there is
-                            # no amber14sb, no *-ILDN and no CHARMM set). The alchemical
-                            # mutation must use a force field pmx has hybrid parameters for,
-                            # so the whole Stage 3 system is amber99sb + tip3p.
-                            # Stage 1 prep is unaffected: for the FEP path it only emits
-                            # coordinates (solvate=False, no force field constructed), and
+  ff_protein: amber99sb-star-ildn   # DESCRIPTIVE ONLY -- the authoritative value for
+                            # Stage 3 is fep.pmx_forcefield (amber99sb-star-ildn-mut),
+                            # since the alchemical mutation must use a force field pmx has
+                            # hybrid parameters for. pmx/data/mutff45 ships complete
+                            # GROMACS force fields (aminoacids.rtp, ffbonded/ffnonbonded,
+                            # forcefield.itp, tip3p.itp) plus its mutres.* overlay, so
+                            # pdb2gmx uses them directly via GMXLIB.
+                            # Stage 1 prep is unaffected: on the FEP path it only emits
+                            # coordinates (solvate=False, no force field constructed) and
                             # pdb2gmx rebuilds hydrogens under the pmx force field anyway.
   ion_conc_M: 0.15
   ph: 7.0                   # Stage 1 protonation pH (PDBFixer addMissingHydrogens)
