@@ -89,9 +89,21 @@ def _run(cmd: list[str], cwd: Path, stdin: str | None = None, dry_run: bool = Fa
     )
     out = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode != 0:
+        hint = ""
+        # exit 127 / a loader error means the binary exists but its runtime libraries
+        # (MKL, CUDA) are absent -- i.e. the modules never loaded, not a GROMACS problem.
+        if proc.returncode == 127 or "error while loading shared libraries" in out:
+            hint = (
+                "\n\nHINT: the binary was found but could not load its libraries -- the "
+                "environment modules did not load.\n"
+                "      Run `source scripts/scc_env.sh` and check it does not warn about "
+                "'module: command not found'.\n"
+                "      In a non-interactive shell (qrsh ... bash -lc '...') Lmod may be "
+                "uninitialised; scc_env.sh bootstraps it, so source it FIRST."
+            )
         raise ToolError(
             f"command failed (exit {proc.returncode}) in {cwd}:\n  {printable}\n"
-            f"--- last 40 lines ---\n" + "\n".join(out.splitlines()[-40:])
+            f"--- last 40 lines ---\n" + "\n".join(out.splitlines()[-40:]) + hint
         )
     _log(f"  ok ({time.time() - t0:.1f}s)")
     return out

@@ -32,6 +32,27 @@ CUDA_MODULE="${CUDA_MODULE:-$(_scc_cfg cuda_module)}"
 GMX="${GMX:-$(_scc_cfg gmx_binary)}"
 SOD1_ENV="${SOD1_ENV:-sod1-fep}"
 
+# Lmod defines `module` as a shell FUNCTION via a profile script. A non-interactive
+# shell -- notably `qrsh ... bash -lc '...'` and some batch contexts -- can start without
+# it, and then every `module load` silently no-ops and GROMACS later dies with
+# "error while loading shared libraries: libmkl_core.so.2". Bootstrap it explicitly.
+if ! type module >/dev/null 2>&1; then
+  for _init in /etc/profile.d/lmod.sh /etc/profile.d/modules.sh \
+               "${LMOD_PKG:-}/init/bash" /usr/share/lmod/lmod/init/bash \
+               /usr/local/lmod/lmod/init/bash /share/module.8/lmod/lmod/init/bash; do
+    if [[ -n "${_init}" && -f "${_init}" ]]; then
+      # shellcheck disable=SC1090
+      source "${_init}" && break
+    fi
+  done
+fi
+if ! type module >/dev/null 2>&1; then
+  echo "ERROR: Lmod's 'module' command is unavailable in this shell, so no modules can" >&2
+  echo "       be loaded and GROMACS will fail on missing MKL/CUDA libraries." >&2
+  echo "       Run from an interactive session, or tell me which init script your" >&2
+  echo "       login shell sources (grep -l lmod /etc/profile.d/*)." >&2
+fi
+
 # if-statements rather than `[[ ... ]] && cmd`: this file is sourced by scripts running
 # under `set -e`, where a false test at the head of an && list can abort the caller.
 if [[ -n "${CONDA_MODULE}" ]]; then
