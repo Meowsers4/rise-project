@@ -12,7 +12,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.prep.tripeptide import _SKIP_RESNAMES, _unitvec, build_capped_tripeptide
+from src.prep.tripeptide import (
+    _SKIP_RESNAMES,
+    _unitvec,
+    build_capped_tripeptide,
+    rename_caps_for_gromacs,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 STRUCTURE_3ECU = ROOT / "data" / "structures" / "3ECU.pdb"
@@ -36,6 +41,51 @@ def test_unitvec_normalizes():
 
 def test_unitvec_zero_is_safe():
     assert np.allclose(_unitvec(np.zeros(3)), 0.0)  # no division-by-zero
+
+
+class _StubAtom:
+    def __init__(self, name):
+        self.name = name
+
+
+class _StubResidue:
+    def __init__(self, name, atom_names):
+        self.name = name
+        self._atoms = [_StubAtom(n) for n in atom_names]
+
+    def atoms(self):
+        return iter(self._atoms)
+
+
+class _StubTopology:
+    def __init__(self, residues):
+        self._residues = residues
+
+    def residues(self):
+        return iter(self._residues)
+
+
+def _names(residue):
+    return [a.name for a in residue.atoms()]
+
+
+def test_rename_caps_maps_openmm_names_to_rtp():
+    """pdb2gmx matches the amber .rtp: caps need HH31-33, and NME's methyl C is CH3."""
+    ace = _StubResidue("ACE", ["CH3", "H1", "H2", "H3", "C", "O"])
+    nme = _StubResidue("NME", ["N", "H", "C", "H1", "H2", "H3"])
+    assert rename_caps_for_gromacs(_StubTopology([ace, nme])) == 7  # 3 in ACE, 4 in NME
+
+    # ACE: methyl hydrogens renamed; the CARBONYL C and O must survive untouched.
+    assert _names(ace) == ["CH3", "HH31", "HH32", "HH33", "C", "O"]
+    # NME: PDBFixer renamed our CH3 to C -- put it back, or pdb2gmx aborts.
+    assert _names(nme) == ["N", "H", "CH3", "HH31", "HH32", "HH33"]
+
+
+def test_rename_caps_leaves_standard_residues_alone():
+    """A backbone C in a normal residue must never be rewritten to CH3."""
+    ala = _StubResidue("ALA", ["N", "H", "CA", "HA", "C", "O", "CB"])
+    assert rename_caps_for_gromacs(_StubTopology([ala])) == 0
+    assert _names(ala) == ["N", "H", "CA", "HA", "C", "O", "CB"]
 
 
 def _first_protein_resid(pdb_path):

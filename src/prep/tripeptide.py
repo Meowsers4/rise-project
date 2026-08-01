@@ -31,6 +31,18 @@ _D_C_O = 0.123          # C=O
 _D_N_CH3 = 0.147        # amide N--methyl C
 _SKIP_RESNAMES = frozenset({"HOH", "WAT", "CU", "ZN", "NA", "CL"})
 
+# PDBFixer names the caps by OpenMM convention: methyl hydrogens H1/H2/H3, and it RENAMES
+# the NME methyl carbon we create as "CH3" to "C". GROMACS' amber .rtp entries use
+# HH31/HH32/HH33 and keep the NME methyl carbon as CH3, so pdb2gmx aborts with
+# "Atom C in residue NME 5 was not found in rtp entry NME with 6 atoms" (verified against
+# amber99sb-star-ildn-mut, 2026-08-01). ACE's carbonyl C and O already match and are NOT
+# renamed -- only NME's C is the methyl. Applied to the WRITTEN file only; the in-memory
+# topology keeps OpenMM names so ForceField.createSystem() still validates it.
+_CAP_ATOM_RENAMES: dict[str, dict[str, str]] = {
+    "ACE": {"H1": "HH31", "H2": "HH32", "H3": "HH33"},
+    "NME": {"C": "CH3", "H1": "HH31", "H2": "HH32", "H3": "HH33"},
+}
+
 
 def _unitvec(v: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(v)
@@ -160,6 +172,28 @@ def build_capped_tripeptide(wt_pdb: str | Path, center: int, chain_id: str | Non
     return fixer.topology, fixer.positions
 
 
+def rename_caps_for_gromacs(topology) -> int:
+    """Rename ACE/NME cap atoms in place, OpenMM convention -> GROMACS amber ``.rtp``.
+
+    Returns the number of atoms renamed (7 for a well-formed capped tripeptide: 3 methyl
+    hydrogens in ACE, plus the methyl carbon and 3 hydrogens in NME). Call this
+    only AFTER any OpenMM ``createSystem`` validation: ``amber14-all.xml`` matches the
+    OpenMM names, and renaming first makes the template lookup fail. See
+    :data:`_CAP_ATOM_RENAMES` for why the names differ.
+    """
+    renamed = 0
+    for residue in topology.residues():
+        mapping = _CAP_ATOM_RENAMES.get(residue.name)
+        if not mapping:
+            continue
+        for atom in residue.atoms():
+            new_name = mapping.get(atom.name)
+            if new_name is not None:
+                atom.name = new_name
+                renamed += 1
+    return renamed
+
+
 def build_tripeptide(cfg: dict, variant: str, wt_pdb: str | Path, out_path: str | Path,
                      validate: bool = True) -> Path:
     """Write the unsolvated capped tripeptide reference for ``variant`` to ``out_path``."""
@@ -175,6 +209,10 @@ def build_tripeptide(cfg: dict, variant: str, wt_pdb: str | Path, out_path: str 
         scfg = cfg["structure"]
         ff = ForceField("amber14-all.xml", f"amber14/{scfg['water_model']}.xml")
         ff.createSystem(top)
+
+    # Stage 3's pmx engine feeds this file to pdb2gmx, which matches atom names against
+    # the amber .rtp. Rename after validation, so the file on disk is GROMACS-readable.
+    rename_caps_for_gromacs(top)
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
