@@ -19,7 +19,12 @@ is the single source of truth for the panel.
    parameterized arm, not a config flag or a refactor.
 2. **The validation gate is go/no-go.** Do not run FEP on uncharacterized variants
    until FEP reproduces the experimental ΔΔG of the positive controls above
-   `validation.min_pearson`. Never bypass or lower this threshold to "make progress".
+   `validation.min_pearson` AND within `validation.max_rmse_kcal`. Never bypass or lower
+   either threshold to "make progress". The gate subset is **charge-neutral only**: a
+   mutation that changes net charge carries a PME finite-size artifact that does not
+   cancel between the folded and unfolded legs (different box sizes), and the engine has
+   no counterion co-alchemy. Adding a charge-changing variant to the gate requires
+   solving that first.
 3. **Mature numbering.** Variant names use mature (153-residue) numbering; the
    precursor has an extra N-terminal Met. The offset lives ONLY in
    `pipeline.yaml:project.mature_offset`. Never hardcode residue indices anywhere.
@@ -29,11 +34,38 @@ is the single source of truth for the panel.
 5. **Replicates and error bars are mandatory** for any free-energy result. A ΔΔG
    without an uncertainty and a cycle-closure check is not a result.
 
-## Before writing implementation code
-Resolve the open decisions in `README.md §9` WITH THE USER first — especially:
-- FEP framework (openmm_perses | gromacs_pmx | amber_ti) — shapes all of `src/fep/`.
-- GPU count, partition name, walltime — sizes the panel and SGE array chunking.
-Ask these interactively; do not pick defaults and proceed.
+## Stage 3 stack — RESOLVED, do not relitigate
+**GROMACS + pmx.** Not OpenMM+Perses. A research spike (2026-07-21) proved perses
+hard-requires OpenEye for protein-mutation atom mapping in every version — including the
+"OpenEye-free" lower-level path — confirmed by a GPU smoke test dying at
+`_construct_atom_map -> import openeye.oechem`. The SCC has no OpenEye and no licence.
+`src/fep/perses_engine.py` is kept only as dead reference; the live engine is
+`src/fep/pmx_engine.py`, selected by `fep.framework: gromacs_pmx` through the dispatch
+map in `src/fep/window.py`.
+
+Per (variant, leg) the engine runs: `pdb2gmx` → `pmx mutate` → `pdb2gmx` → `pmx gentop`
+→ box/solvate/genion → EM, cached behind a `SYSTEM_READY` marker; then per window a
+generated `.mdp`, `grompp`, `mdrun`, and `alchemlyb` on `dhdl.xvg` → the same
+`u_kn_window` NPZ schema `src/fep/analyze.py` has always consumed. Force field is
+`amber99sb-star-ildn-mut` from `pmx/data/mutff45` (pdb2gmx finds it only via `GMXLIB`).
+
+**pdb2gmx order matters:** pmx's own help requires its input to have come from pdb2gmx.
+Feeding it a raw PDBFixer file makes pmx parse zero residues and die in `make_chains()`.
+
+## Invariants GROMACS will silently undo
+Stage 1 enforces these on an OpenMM topology; the GROMACS path needs its OWN guard:
+- **Reduced disulfide.** `pdb2gmx` re-detects Cys57–Cys146 by SG–SG distance and rebuilds
+  it. The engine answers `-ss` prompts "n" per cysteine (`fep.keep_disulfide_reduced`).
+- **Which residue gets mutated.** PDBFixer/pdb2gmx RENUMBER. In the capped tripeptide the
+  site is the *middle* residue (3), not `mature_pos` — sending `mature_pos` mutates a
+  neighbour and yields a plausible, wrong ΔΔG. `pmx_engine.mutation_resid()` reads the id
+  from the actual file and verifies the residue name against the panel's wild type.
+
+## Results must carry provenance
+Every window records the engine that produced it; `analyze.py` refuses to mix engines or
+accept an unlabelled window; `validate.py` gates only on `provenance == fep.framework`.
+This exists because fabricated ΔΔG files (experimental values + noise) once produced a
+`validation_gate.json` reading "passed, pearson 0.994". Never hand-write a result file.
 
 ## How to work here
 - Prefer editing existing modules under `src/<stage>/` over adding new top-level code.
@@ -43,9 +75,18 @@ Ask these interactively; do not pick defaults and proceed.
   `(variant, leg, window, replicate)`. Keep that granularity — it's the whole point.
 - GPUs are requested via `-l gpus=1 -l gpu_c=7.0` and assigned by the scheduler
   through `CUDA_VISIBLE_DEVICES`; never hardcode device IDs (one window = one GPU).
-- SCC modules are versioned (no bare names): `miniconda/25.3.1`, `cuda/12.8` (stay on
-  the 12.x line for OpenMM). These live in `config/pipeline.yaml:cluster.{conda,cuda}_module`;
-  scripts read them from there (env-var override allowed).
+- `source scripts/scc_env.sh` is the ONE way to get a working shell (interactive or
+  batch); `submit_array.sh` sources the same file so the two cannot drift. It bootstraps
+  Lmod, loads the module chain, activates conda, and exports `PYTHONPATH`/`GMXLIB`.
+- SCC modules are versioned (no bare names) and live in `config/pipeline.yaml:cluster.*`.
+  Three traps, all already encoded in config — don't rediscover them:
+  1. `module load gromacs/2025.3` gives the **CPU-only** build. The CUDA build is a
+     separate tree (`install_gpu`), selected via `cluster.gmx_gmxrc`. It needs
+     `cuda/12.8 intel/2024.0 gcc/12.2.0` at runtime (it links MKL), not openmpi.
+  2. `/etc/profile.d` skips Lmod in **non-interactive** shells (`qrsh ... bash -lc`, SGE
+     tasks), so `module` is undefined. `cluster.lmod_init` pins
+     `/usr/local/lmod/8.7.12/init/bash`; a stale broken 7.8 tree sorts ahead of it in globs.
+  3. SCC home has a 10 GB quota — conda envs must live under `/projectnb`.
 - Checkpoint long GPU jobs; assume windows will die and must resume.
 - Honor `cluster.trajectory_retention` — do not persist raw frames when the config
   says estimates only (disk fills fast).
