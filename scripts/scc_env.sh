@@ -97,8 +97,25 @@ export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
 # GMXLIB: pdb2gmx only finds pmx's mutation force fields if this points at the directory
 # holding them. Derived from the installed pmx so it follows the env, not a hardcoded
 # path (the engine sets this too; exporting it here makes interactive gmx calls work).
+# The directory name is version dependent (mutff45 on pmx 2.0 snapshots, mutff on current
+# develop), so ask the engine's own pmx_ff_dir() rather than hardcoding either -- same
+# no-drift rule as the module names above. The literal probe is only a fallback for when
+# the repo is not importable yet (e.g. PYTHONPATH not picked up).
 if python -c "import pmx" >/dev/null 2>&1; then
-  GMXLIB="$(python -c "import pmx, os; print(os.path.join(os.path.dirname(pmx.__file__), 'data', 'mutff45'))" 2>/dev/null)"
+  GMXLIB="$(python -c "
+from src.prep.build import load_config
+from src.fep.pmx_engine import pmx_ff_dir
+print(pmx_ff_dir(load_config('${_SCC_CONFIG}')))" 2>/dev/null)"
+  if [[ -z "${GMXLIB}" || ! -d "${GMXLIB}" ]]; then
+    GMXLIB="$(python -c "
+import os, pmx
+data = os.path.join(os.path.dirname(pmx.__file__), 'data')
+for name in ('mutff45', 'mutff'):
+    path = os.path.join(data, name)
+    if os.path.isdir(path):
+        print(path)
+        break" 2>/dev/null)"
+  fi
   if [[ -d "${GMXLIB}" ]]; then export GMXLIB; else unset GMXLIB; fi
 fi
 

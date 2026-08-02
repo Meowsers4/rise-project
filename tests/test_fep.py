@@ -168,3 +168,58 @@ def test_hysteresis_small_for_good_overlap():
         x = rng.normal(0.0, 1.0 / np.sqrt(K[w]), size=2000)
         per_window.append(0.5 * K[:, None] * (x[None, :] ** 2))
     assert leg_hysteresis_kT(per_window) < 0.5  # kT
+
+
+def _fake_pmx(monkeypatch, tmp_path, layout: dict[str, list[str]]):
+    """Install a stub ``pmx`` package whose data dir has the given <dir>/<ff>.ff layout."""
+    import types
+
+    pkg = tmp_path / "pmx"
+    for dirname, ffs in layout.items():
+        for ff in ffs:
+            (pkg / "data" / dirname / f"{ff}.ff").mkdir(parents=True, exist_ok=True)
+    module = types.ModuleType("pmx")
+    module.__file__ = str(pkg / "__init__.py")
+    monkeypatch.setitem(sys.modules, "pmx", module)
+
+
+def _ff_cfg(name="amber99sb-star-ildn-mut"):
+    return {"fep": {"pmx_ff_dir": "auto", "pmx_forcefield": name}}
+
+
+def test_pmx_ff_dir_prefers_mutff45_on_old_layout(monkeypatch, tmp_path):
+    """pmx 2.0 ships both; mutff45 holds the real set and must win over legacy mutff."""
+    from src.fep.pmx_engine import pmx_ff_dir
+
+    _fake_pmx(monkeypatch, tmp_path, {
+        "mutff45": ["amber99sb-star-ildn-mut"],
+        "mutff": ["amber99sb-star-ildn-mut"],
+    })
+    assert pmx_ff_dir(_ff_cfg()).name == "mutff45"
+
+
+def test_pmx_ff_dir_finds_mutff_on_current_develop(monkeypatch, tmp_path):
+    """Current develop dropped mutff45; the force field lives in mutff."""
+    from src.fep.pmx_engine import pmx_ff_dir
+
+    _fake_pmx(monkeypatch, tmp_path, {"mutff": ["amber99sb-star-ildn-mut"]})
+    assert pmx_ff_dir(_ff_cfg()).name == "mutff"
+
+
+def test_pmx_ff_dir_skips_dir_lacking_the_forcefield(monkeypatch, tmp_path):
+    """A mutff45 that does not carry the configured ff must not shadow the one that does."""
+    from src.fep.pmx_engine import pmx_ff_dir
+
+    _fake_pmx(monkeypatch, tmp_path, {
+        "mutff45": ["charmm36mut"],
+        "mutff": ["amber99sb-star-ildn-mut"],
+    })
+    assert pmx_ff_dir(_ff_cfg()).name == "mutff"
+
+
+def test_pmx_ff_dir_explicit_config_wins(monkeypatch, tmp_path):
+    from src.fep.pmx_engine import pmx_ff_dir
+
+    _fake_pmx(monkeypatch, tmp_path, {"mutff": ["amber99sb-star-ildn-mut"]})
+    cfg = {"fep": {"pmx_ff_dir": "/opt/custom/ff", "pmx_forcefield": "x"}}
+    assert pmx_ff_dir(cfg) == Path("/opt/custom/ff")

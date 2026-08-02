@@ -47,10 +47,27 @@ Per (variant, leg) the engine runs: `pdb2gmx` → `pmx mutate` → `pdb2gmx` →
 → box/solvate/genion → EM, cached behind a `SYSTEM_READY` marker; then per window a
 generated `.mdp`, `grompp`, `mdrun`, and `alchemlyb` on `dhdl.xvg` → the same
 `u_kn_window` NPZ schema `src/fep/analyze.py` has always consumed. Force field is
-`amber99sb-star-ildn-mut` from `pmx/data/mutff45` (pdb2gmx finds it only via `GMXLIB`).
+`amber99sb-star-ildn-mut` (pdb2gmx finds it only via `GMXLIB`).
+
+**pmx must be new enough to read a PDB.** Require a revision at or after upstream
+`866f34cf0` (2022-03-30, "do not relabel chain IDs if the chain already has an ID").
+In `2.0+38.ga2311b9` the `self.atoms.append(a)` in `Model.__readPDBTER` is mis-indented
+into an inner `if (a.chain_id==' ') or ...` branch, so a PDB whose atoms carry a non-blank
+chain id — i.e. anything `pdb2gmx` writes — parses to ZERO atoms. `make_chains()` then
+appends its still-`None` accumulator and dies with `'NoneType' object has no attribute
+'model'`. Blanking the chain id does NOT work around it: the same block sets
+`bNewChain = False`, so only the first atom would ever land. Verified on the SCC 2026-08-01.
+
+**The force-field directory name is version dependent** — `data/mutff45` on 2.0-era
+snapshots (where a flat legacy `data/mutff` also exists and is NOT the one to use),
+`data/mutff` on current develop, which dropped mutff45 and is now the maintained set.
+Never hardcode either: `pmx_engine.pmx_ff_dir()` probes both and picks whichever holds
+`fep.pmx_forcefield`, and `scripts/scc_env.sh` calls that same function to set `GMXLIB`.
 
 **pdb2gmx order matters:** pmx's own help requires its input to have come from pdb2gmx.
-Feeding it a raw PDBFixer file makes pmx parse zero residues and die in `make_chains()`.
+Feeding it a raw PDBFixer file makes pmx parse zero residues and die in `make_chains()` —
+the SAME traceback as the stale-pmx bug above, so check the pmx revision before assuming
+it is an input-ordering problem.
 
 ## Invariants GROMACS will silently undo
 Stage 1 enforces these on an OpenMM topology; the GROMACS path needs its OWN guard:

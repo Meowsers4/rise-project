@@ -51,6 +51,10 @@ ROOT = Path(__file__).resolve().parents[2]
 # build died partway and the directory must not be trusted.
 _DONE_MARKER = "SYSTEM_READY"
 
+# Candidate force-field directory names inside ``pmx/data``, most specific first. See
+# :func:`pmx_ff_dir` -- pmx renamed this between the 2.0 snapshots and current develop.
+_PMX_FF_DIRNAMES = ("mutff45", "mutff")
+
 
 def _log(msg: str) -> None:
     """Progress to stderr -- survives on the SGE task log even if the job is killed."""
@@ -164,12 +168,32 @@ def pmx_ff_dir(cfg: dict) -> Path:
 
     ``fep.pmx_ff_dir: auto`` derives it from the installed pmx package rather than
     hardcoding a site path, so the config survives a different pmx location.
+
+    The layout is VERSION DEPENDENT and both names are live in the wild:
+
+    * pmx 2.0-era snapshots ship ``data/mutff45`` (a complete GROMACS ff set) alongside a
+      legacy flat GROMACS-4.5-style ``data/mutff``; there, mutff45 is the one to use.
+    * current develop ships only ``data/mutff``, which is now the maintained set and does
+      contain ``amber99sb-star-ildn-mut.ff``.
+
+    So probe both and return whichever actually holds ``fep.pmx_forcefield``. Falling back
+    to the first directory that merely exists keeps :func:`verify_tools`' "no such force
+    field, available: ..." message useful instead of raising a bare path error here.
     """
     configured = str(cfg["fep"].get("pmx_ff_dir", "auto")).strip()
     if configured and configured != "auto":
         return Path(configured)
     import pmx
-    return Path(pmx.__file__).parent / "data" / "mutff45"
+    data = Path(pmx.__file__).parent / "data"
+    candidates = [data / name for name in _PMX_FF_DIRNAMES]
+    ff = cfg["fep"]["pmx_forcefield"]
+    for candidate in candidates:
+        if (candidate / f"{ff}.ff").is_dir():
+            return candidate
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    return candidates[0]
 
 
 def gmx_env(cfg: dict) -> dict:
