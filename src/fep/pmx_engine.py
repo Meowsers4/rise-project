@@ -427,12 +427,14 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
                           sys_dir / "mutation.txt", dry_run=dry_run)
     _run([*pmx_argv(cfg, "mutate"),
           "-f", "wt_gmx.pdb", "-o", "hybrid.pdb", "-ff", ff,
-          "-script", "mutation.txt"],
+          "--script", "mutation.txt"],
          cwd=sys_dir, dry_run=dry_run)
 
     # 3. pdb2gmx again, now on the hybrid -- this is the topology we keep.
+    #    No -ignh here: the hybrid residue's hydrogens were built by pmx mutate and
+    #    pdb2gmx has no hdb entry for hybrid residues, so rebuilding them fails.
     _run([gmx, "pdb2gmx", "-f", "hybrid.pdb", "-o", "conf.gro", "-p", "topol.top",
-          "-ff", ff, "-water", water, "-ignh", "-ss", *heavyh],
+          "-ff", ff, "-water", water, "-ss", *heavyh],
          cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
 
     # 4. pmx gentop -- write the B-state (mutant) parameters into the topology.
@@ -458,7 +460,8 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
     _write_mdp(sys_dir / "em.mdp", _minim_mdp(cfg), dry_run=dry_run)
     _run([gmx, "grompp", "-f", "em.mdp", "-c", "ions.gro", "-p", "hybrid.top",
           "-o", "em.tpr", "-maxwarn", "2"], cwd=sys_dir, dry_run=dry_run)
-    _run([*mdrun_argv(cfg, gpu=False), "-deffnm", "em"], cwd=sys_dir, dry_run=dry_run)
+    _run([*mdrun_argv(cfg, gpu=False), "-deffnm", "em"], cwd=sys_dir, dry_run=dry_run,
+         env={"OMP_NUM_THREADS": str(cfg["cluster"]["mdrun_ntomp"])})
 
     if not dry_run:
         (sys_dir / _DONE_MARKER).write_text(
@@ -644,9 +647,13 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
           "-o", "prod.tpr", "-maxwarn", "2"], cwd=run_dir, dry_run=dry_run)
 
     # -cpi/-cpo: GROMACS resumes from its own checkpoint if the job was killed (CLAUDE.md).
+    # -cpi/-append only make sense once a checkpoint exists; on a fresh run mdrun
+    # errors out if they are passed without prod.cpt present.
+    resume = ["-cpi", "prod.cpt", "-append"] if (run_dir / "prod.cpt").exists() else []
     _run([*mdrun_argv(cfg), "-deffnm", "prod",
-          "-cpi", "prod.cpt", "-cpo", "prod.cpt", "-append",
-          "-dhdl", "dhdl.xvg"], cwd=run_dir, dry_run=dry_run)
+          *resume, "-cpo", "prod.cpt",
+          "-dhdl", "dhdl.xvg"], cwd=run_dir, dry_run=dry_run,
+         env={"OMP_NUM_THREADS": str(cfg["cluster"]["mdrun_ntomp"])})
 
     if dry_run:
         return {"lambda_index": window, "n_states": n_states,

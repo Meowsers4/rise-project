@@ -2,8 +2,11 @@
 #
 # submit_array.sh -- SGE array submission helper for Stage 3 (alchemical FEP) on the
 # BU SCC (Open Grid Scheduler / SGE). One array of N tasks PER VARIANT, where
-# N = legs x lambda_windows x replicates (2 x 18 x 5 = 180 with the current config).
-# SGE_TASK_ID (1..N) decodes to (leg, window, replicate); the variant is passed in.
+# N = fep.legs x fep.lambda_windows x fep.replicates, read from config/pipeline.yaml
+# below -- never restate the product in prose (it drifts). The #$ -t default must equal
+# N; the runtime guard recomputes N from config and refuses to launch if the submitted
+# array size disagrees. SGE_TASK_ID (1..N) decodes to (leg, window, replicate); the
+# variant is passed in.
 #
 # Usage (submit from the REPO ROOT -- the job runs with -cwd, see below):
 #   cd <repo> && mkdir -p logs/fep          # -o dir must exist at submit time
@@ -27,7 +30,7 @@
 #$ -j y
 #$ -cwd
 #$ -o logs/fep/
-#$ -t 1-180
+#$ -t 1-108
 
 set -euo pipefail
 

@@ -27,12 +27,16 @@ VARIANTS   = load_variants()
 LEGS       = config["fep"]["legs"]
 WINDOWS    = list(range(config["fep"]["lambda_windows"]))
 REPLICATES = list(range(config["fep"]["replicates"]))
+# rule all targets the validation gate, not the whole panel: only
+# validation.gate_subset (charge-neutral controls) is FEP-runnable today, and the
+# prescreen backend does not exist. GATE_SUBSET is what the gate needs as inputs.
+GATE_SUBSET = config["validation"]["gate_subset"]
 
 
 # ---- Target rule -----------------------------------------------------------
 rule all:
     input:
-        config["validation"]["outputs"]["ddg_map"],
+        [f"results/fep/{v}/ddg.json" for v in GATE_SUBSET],
 
 
 # ---- Stage 0: build & stratify the variant panel ---------------------------
