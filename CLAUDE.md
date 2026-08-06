@@ -108,6 +108,24 @@ is per-task, never hit. Progress = count `results/fep/<variant>/**/w*_r*.npz`.
 SGE log files appear when a task STARTS; grep them for python Tracebacks AND bash
 `unbound variable` errors.
 
+## Minimisation must be lambda-aware
+`grompp` without `free-energy = yes` builds the system from **A-state parameters alone**.
+In a pmx hybrid topology the appearing atoms are dummies in state A — no charge, no LJ —
+so minimisation relaxes real atoms *into* them. Switching them on at a high lambda then
+explodes the system on step 1: LINCS reports bond lengths in the millions and the GPU
+faults with `cudaErrorIllegalAddress` (a symptom, not the cause — do not go looking for a
+CUDA bug). A4V folded w17 (λ=1.0) died this way in all three replicates while every
+unfolded window survived, because position 4 is buried and the tripeptide is not.
+
+`_minim_mdp(cfg, window)` therefore emits the free-energy + soft-core block, and
+`run_pmx_window` minimises **per window at that window's λ** before production, starting
+from the shared `system/em.gro`. The shared build still calls `_minim_mdp(cfg)` with no
+window — solvation and ions only care about the physical topology.
+`tests/test_fep.py:test_window_minimisation_is_lambda_aware` guards this.
+
+Corollary: a window that merely *survives* is not evidence the protocol is right. The
+high-λ windows that did not crash were started from the same A-state-minimised structure.
+
 ## Results must carry provenance
 Every window records the engine that produced it; `analyze.py` refuses to mix engines or
 accept an unlabelled window; `validate.py` gates only on `provenance == fep.framework`.

@@ -74,6 +74,25 @@ def test_real_window_requires_validation_gate(tmp_path, monkeypatch):
         run_window(cfg, "G93A", "folded", 0, 0, tmp_path / "window.npz")
 
 
+def test_window_minimisation_is_lambda_aware():
+    """Regression: EM with free-energy OFF minimises at the A state, where the appearing
+    atoms are dummies. Real atoms relax on top of them and the window detonates on step 1
+    at high lambda (A4V folded w17, all three replicates, 2026-08-06)."""
+    from src.fep.pmx_engine import _minim_mdp
+
+    cfg = {"fep": {"lambda_windows": 18, "nonbonded_method": "PME",
+                   "nonbonded_cutoff_nm": 1.0, "sc_function": "beutler",
+                   "sc_alpha": 0.3, "sc_power": 1, "sc_sigma": 0.25}}
+
+    per_window = _minim_mdp(cfg, 17)
+    assert "free-energy              = yes" in per_window
+    assert "init-lambda-state        = 17" in per_window
+    assert "sc-function              = beutler" in per_window   # soft-core, or lambda=1 blows up
+
+    # The shared system build minimises the physical topology only -- no lambda there.
+    assert "free-energy" not in _minim_mdp(cfg)
+
+
 def test_mock_window_is_identical_across_processes():
     """Regression: hash() is per-process randomized, so seeding from it gave every SGE
     array task a different oscillator ladder and MBAR silently blended them."""
