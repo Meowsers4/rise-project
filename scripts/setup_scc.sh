@@ -25,7 +25,6 @@ GMX="${GMX:-$(cfg_get gmx_binary)}"
 SOD1_ENV="${SOD1_ENV:-sod1-fep}"
 
 : "${CONDA_MODULE:?set cluster.conda_module in ${CONFIG} or CONDA_MODULE}"
-: "${GROMACS_MODULE:?set cluster.gromacs_module in ${CONFIG} or GROMACS_MODULE}"
 
 echo "== module load =="
 module load "${CONDA_MODULE}"   || echo "WARN: 'module load ${CONDA_MODULE}' failed -- set CONDA_MODULE"
@@ -34,7 +33,11 @@ module load "${CONDA_MODULE}"   || echo "WARN: 'module load ${CONDA_MODULE}' fai
 for _m in ${GROMACS_PREREQ}; do
   module load "${_m}" || echo "WARN: prerequisite 'module load ${_m}' failed"
 done
-module load "${GROMACS_MODULE}" || echo "WARN: 'module load ${GROMACS_MODULE}' failed -- set GROMACS_MODULE"
+if [[ -n "${GROMACS_MODULE}" ]]; then
+  module load "${GROMACS_MODULE}" || echo "WARN: 'module load ${GROMACS_MODULE}' failed -- set GROMACS_MODULE"
+else
+  echo "  no GROMACS module configured; using cluster.gmx_gmxrc / gmx_binary"
+fi
 [[ -n "${CUDA_MODULE}" ]] && { module load "${CUDA_MODULE}" || echo "WARN: cuda module ${CUDA_MODULE} failed"; }
 
 # MPI builds ship gmx_mpi, non-MPI builds ship gmx. Auto-detect unless pinned in config.
@@ -71,12 +74,14 @@ for m in ["openmm", "pdbfixer", "pmx", "pymbar", "alchemlyb", "pandas", "yaml", 
         print(f"  FAIL {m:12} {e}")
 PY
   echo "== pmx mutation force fields available =="
-  python - <<'PY'
-import os
+python - <<'PY'
 try:
-    import pmx
-    d = os.path.join(os.path.dirname(pmx.__file__), "data", "mutff")
-    print("  ", sorted(os.listdir(d)) if os.path.isdir(d) else f"no mutff dir at {d}")
+    from pathlib import Path
+    from src.fep.pmx_engine import pmx_ff_dir
+    from src.prep.build import load_config
+    d = pmx_ff_dir(load_config("config/pipeline.yaml"))
+    print("  ", sorted(p.name for p in Path(d).glob("*.ff")) if Path(d).is_dir()
+           else f"no mutation force-field dir at {d}")
 except Exception as e:
     print("   pmx unavailable:", e)
 PY

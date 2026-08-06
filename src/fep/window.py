@@ -4,8 +4,9 @@ One invocation == one SGE array task == one GPU (README §4 Stage 3). It writes 
 reduced potentials for this window to an ``.npz`` that :mod:`src.fep.analyze`
 aggregates with MBAR.
 
-The real engine is OpenMM + Perses (GPU) and is isolated behind a backend, so the
-pipeline runs locally in **mock mode** (``FEP_MOCK=1``) using synthetic
+The real engine is selected from ``fep.framework`` (GROMACS + pmx for the current
+pipeline) and is isolated behind a backend, so the pipeline runs locally in **mock mode**
+(``FEP_MOCK=1``) using synthetic
 harmonic-oscillator samples of *known* free energy -- enough to exercise the window
 IO, the checkpoint/output schema, and the MBAR analyzer without a GPU. Mock output is
 never a result, and that is ENFORCED rather than documented: every window records a
@@ -24,6 +25,7 @@ NPZ schema (one window):
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 
@@ -35,6 +37,26 @@ from src.seeds import stable_seed
 ROOT = Path(__file__).resolve().parents[2]
 _MOCK_SAMPLES = 300
 MOCK_PROVENANCE = "mock"
+
+
+def _assert_validation_gate(cfg: dict, variant: str) -> None:
+    """Refuse real FEP outside the gate subset until the gate report passes."""
+    validation = cfg["validation"]
+    if variant in validation["gate_subset"]:
+        return
+    report = ROOT / validation["outputs"]["gate_report"]
+    try:
+        passed = json.loads(report.read_text()).get("passed") is True
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        raise RuntimeError(
+            f"refusing real FEP for {variant}: validation gate report {report} is "
+            f"missing or invalid ({exc})"
+        ) from exc
+    if not passed:
+        raise RuntimeError(
+            f"refusing real FEP for {variant}: validation gate has not passed; "
+            f"see {report}"
+        )
 
 
 def _stable_target_kT(variant: str, leg: str) -> float:
@@ -106,6 +128,7 @@ def run_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     if os.environ.get("FEP_MOCK"):
         data = mock_window(variant, leg, window, rep, n_states)
     else:
+        _assert_validation_gate(cfg, variant)
         data = _real_window(cfg, variant, leg, window, rep, smoke=smoke)
     # A window without provenance cannot be told apart from a hand-written file.
     data.setdefault("provenance", MOCK_PROVENANCE if os.environ.get("FEP_MOCK")

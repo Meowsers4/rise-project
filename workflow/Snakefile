@@ -31,12 +31,18 @@ REPLICATES = list(range(config["fep"]["replicates"]))
 # validation.gate_subset (charge-neutral controls) is FEP-runnable today, and the
 # prescreen backend does not exist. GATE_SUBSET is what the gate needs as inputs.
 GATE_SUBSET = config["validation"]["gate_subset"]
+GATE_REPORT = config["validation"]["outputs"]["gate_report"]
+
+
+def gate_dependency(wildcards):
+    """Make every non-gate FEP task wait for the control validation barrier."""
+    return [] if wildcards.variant in GATE_SUBSET else GATE_REPORT
 
 
 # ---- Target rule -----------------------------------------------------------
 rule all:
     input:
-        [f"results/fep/{v}/ddg.json" for v in GATE_SUBSET],
+        GATE_REPORT,
 
 
 # ---- Stage 0: build & stratify the variant panel ---------------------------
@@ -73,13 +79,14 @@ rule prescreen:
         "--config config/pipeline.yaml --out {output}"
 
 
-# ---- Stage 3: alchemical FEP window (the SLURM array unit) ------------------
+# ---- Stage 3: alchemical FEP window (the SGE array unit) --------------------
 # One invocation == one (variant, leg, window, replicate). Submit as an SGE array
 # (qsub -t) via scripts/submit_array.sh. Use the scheduler-assigned
 # CUDA_VISIBLE_DEVICES as-is inside src.fep.window -- never hardcode a device id.
 rule fep_window:
     input:
         struct="data/structures/{variant}.pdb",
+        gate=gate_dependency,
     output:
         "results/fep/{variant}/{leg}/w{window}_r{rep}.npz",
     resources:
@@ -98,6 +105,7 @@ rule fep_ddg:
             f"results/fep/{wc.variant}/{leg}/w{w}_r{r}.npz"
             for leg in LEGS for w in WINDOWS for r in REPLICATES
         ],
+        gate=gate_dependency,
     output:
         "results/fep/{variant}/ddg.json",
     shell:
@@ -120,12 +128,26 @@ rule md_mechanism:
         "--config config/pipeline.yaml --out {output}"
 
 
-# ---- Stage 5: validation GATE + classification -----------------------------
+# ---- Stage 5a: validation GATE ----------------------------------------------
+# This is the explicit barrier: only the configured control subset is needed, and
+# non-gate FEP tasks depend on its report through gate_dependency above.
+rule validate_gate:
+    input:
+        [f"results/fep/{v}/ddg.json" for v in GATE_SUBSET],
+    output:
+        GATE_REPORT,
+    shell:
+        "python -m src.analysis.validate --gate-only --config config/pipeline.yaml "
+        "--out {output}"
+
+
+# ---- Stage 5b: validation + classification ---------------------------------
 # Aggregates all per-variant ddG, checks controls, THEN classifies novel variants.
 rule validate:
     input:
         fep=[f"results/fep/{v}/ddg.json" for v in VARIANTS],
         prescreen=[f"results/prescreen/{v}.json" for v in VARIANTS],
+        gate=GATE_REPORT,
     output:
         config["validation"]["outputs"]["ddg_map"],
     shell:

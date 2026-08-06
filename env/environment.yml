@@ -33,6 +33,8 @@ dependencies:
       # pmx is not on conda-forge. NOTE THE BRANCH: deGrootLab/pmx `master` is the legacy
       # PYTHON 2 codebase (its metadata declares Requires-Python <3,>=2.7, so pip refuses
       # it on 3.11). The Python 3 port is on `develop` -- that is the one we need.
-      - pmx @ git+https://github.com/deGrootLab/pmx.git@develop
+      # Pin a known-good revision: older 2.0 snapshots mis-parse pdb2gmx output
+      # with non-blank chain IDs.
+      - pmx @ git+https://github.com/deGrootLab/pmx.git@0dd5f0a9cdf26109eff98bdfeb4ac4e55353aa76
 # NOTE: snakemake is deliberately absent -- Stage 3 dispatches via SGE qsub arrays
 # (scripts/submit_array.sh). Install it separately on a login node if you want the DAG.

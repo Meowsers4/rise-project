@@ -32,7 +32,9 @@
 #$ -o logs/fep/
 #$ -t 1-108
 
-set -euo pipefail
+# NOT -u: GROMACS's GMXRC (sourced via scc_env.sh) reads unbound $shell/$GMXLDLIB and
+# would abort every array task before python runs. Batch must match interactive.
+set -eo pipefail
 
 : "${VARIANT:?set VARIANT, e.g. qsub -v VARIANT=A4V scripts/submit_array.sh}"
 
@@ -56,6 +58,44 @@ fi
 # runs the synthetic window instead of the real GPU one.
 source scripts/scc_env.sh
 echo "host=$(hostname) CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>} mock=${FEP_MOCK:-0}"
+
+# Direct qsub submission must enforce the same control gate as the Snakemake DAG. Gate
+# controls are allowed to produce the data needed by the barrier; every other variant
+# requires an existing, passing validation report before spending GPU time.
+python - "${VARIANT}" "${CONFIG}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+import yaml
+
+variant, config_path = sys.argv[1:]
+config_file = Path(config_path).resolve()
+cfg = yaml.safe_load(config_file.read_text())
+subset = cfg["validation"]["gate_subset"]
+if variant in subset:
+    raise SystemExit(0)
+
+report = Path(cfg["validation"]["outputs"]["gate_report"])
+if not report.is_absolute():
+    report = config_file.parent.parent / report
+try:
+    passed = json.loads(report.read_text()).get("passed") is True
+except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+    print(
+        f"ERROR: cannot submit non-gate variant {variant}: validation gate report "
+        f"{report} is missing or invalid ({exc}). Run the gate first.",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+if not passed:
+    print(
+        f"ERROR: validation gate has not passed; refusing FEP for {variant}. "
+        f"See {report}.",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+PY
 
 # ---- read fan-out geometry from config (no hardcoded params; CLAUDE.md rule 4) --
 read_fep() { python -c "import yaml,sys; print(yaml.safe_load(open('${CONFIG}'))['fep'][sys.argv[1]])" "$1"; }

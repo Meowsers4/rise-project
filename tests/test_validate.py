@@ -16,6 +16,7 @@ import pytest
 from src.analysis.validate import (
     classify_uncharacterized,
     evaluate_gate,
+    run_gate_validation,
     run_validation,
 )
 
@@ -183,3 +184,15 @@ def test_run_validation_fails_refuses_map(tmp_path):
         run_validation(CFG, ddg_map, report, fep_dir=fep_dir, variants_csv=panel)
     assert report.exists()          # report always written
     assert not ddg_map.exists()     # map refused on no-go
+
+
+def test_gate_validation_does_not_require_non_gate_fep(tmp_path):
+    panel = tmp_path / "variants.csv"
+    _write_panel(panel)
+    fep_dir = tmp_path / "fep"
+    _write_fep(fep_dir, {v: _fep(dg) for v, dg in
+                         {"A": 1.1, "B": 2.1, "C": 4.1, "D": 7.1}.items()})
+    report = tmp_path / "gate.json"
+    gate = run_gate_validation(CFG, report, fep_dir=fep_dir, variants_csv=panel)
+    assert gate["passed"]
+    assert report.exists()

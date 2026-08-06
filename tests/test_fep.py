@@ -61,6 +61,19 @@ def test_run_window_mock_schema(tmp_path, monkeypatch):
     assert str(npz["provenance"]) == "mock"   # mock must be self-identifying
 
 
+def test_real_window_requires_validation_gate(tmp_path, monkeypatch):
+    monkeypatch.delenv("FEP_MOCK", raising=False)
+    cfg = {
+        **FEP_CFG,
+        "validation": {
+            "gate_subset": ["A4V"],
+            "outputs": {"gate_report": str(tmp_path / "missing-gate.json")},
+        },
+    }
+    with pytest.raises(RuntimeError, match="validation gate"):
+        run_window(cfg, "G93A", "folded", 0, 0, tmp_path / "window.npz")
+
+
 def test_mock_window_is_identical_across_processes():
     """Regression: hash() is per-process randomized, so seeding from it gave every SGE
     array task a different oscillator ladder and MBAR silently blended them."""

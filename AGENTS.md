@@ -47,12 +47,21 @@ Ask these interactively; do not pick defaults and proceed.
   the 12.x line for OpenMM). These live in `config/pipeline.yaml:cluster.{conda,cuda}_module`;
   scripts read them from there (env-var override allowed).
 - Checkpoint long GPU jobs; assume windows will die and must resume.
+- `scripts/submit_array.sh` must run `set -eo pipefail`, NOT `set -euo pipefail`:
+  GROMACS's `GMXRC` (sourced via `scc_env.sh`) reads unbound `$shell`/`$GMXLDLIB`,
+  and `set -u` aborts every array task before python runs. Batch must match
+  interactive.
+- Never hand-edit the SCC copy of the repo. Fix files locally, commit and push,
+  then `git restore` the touched paths and `git pull` on the SCC — ad-hoc SCC
+  edits diverge and make pulls conflict.
 - Honor `cluster.trajectory_retention` — do not persist raw frames when the config
   says estimates only (disk fills fast).
 
 ## Verification
 - Run `pytest tests/` after touching numbering, panel parsing, or config loading.
 - Dry-run the DAG with `snakemake -n` after changing any rule's inputs/outputs.
+- When array tasks fail, grep `logs/fep/` for python `Traceback|ToolError` AND bash
+  `unbound variable` errors — the latter abort before python ever runs.
 - Report any command you could not run rather than assuming it passed.
 
 ## Style

@@ -174,18 +174,53 @@ def classify_uncharacterized(fep: dict[str, dict], panel: list[dict], cfg: dict)
         v = row["variant"]
         if row["bucket"] == "positive_control" or v not in fep:
             continue
-        if not is_production_result(fep[v], cfg):
+        rec = fep[v]
+        if not is_production_result(rec, cfg):
             continue
-        ddg = fep[v]["ddg"]
+        if not rec.get("converged", False) or (
+            rec.get("cycle_closure_kcal", float("inf"))
+            > cfg["fep"]["convergence"]["max_cycle_closure_kcal"]
+        ):
+            continue
+        ddg = rec["ddg"]
         rows.append({
             "variant": v,
             "bucket": row["bucket"],
             "oligomer": row["oligomer"],
             "fep_ddg": ddg,
-            "fep_ddg_err": fep[v].get("ddg_err"),
+            "fep_ddg_err": rec.get("ddg_err"),
             "prediction": "destabilizing" if ddg > threshold else "stable",
         })
     return rows
+
+
+def run_gate_validation(cfg: dict, out_gate_report: str | Path,
+                        fep_dir: str | Path | None = None,
+                        variants_csv: str | Path | None = None) -> dict:
+    """Evaluate only the control gate and write its report.
+
+    This is the first DAG barrier: it deliberately does not classify variants or require
+    FEP outputs for anything outside ``validation.gate_subset``.
+    """
+    variants_csv = variants_csv or ROOT / cfg["panel"]["csv"]
+    fep_dir = fep_dir or ROOT / "results" / "fep"
+    panel = load_panel(variants_csv)
+    exp = {r["variant"]: float(r["exp_ddg"])
+           for r in panel if r["bucket"] == "positive_control" and r["exp_ddg"]}
+    subset = cfg["validation"].get("gate_subset") or list(exp)
+    fep = load_fep_results(fep_dir, subset)
+    gate = evaluate_gate(fep, exp, cfg)
+
+    out_gate_report = Path(out_gate_report)
+    out_gate_report.parent.mkdir(parents=True, exist_ok=True)
+    out_gate_report.write_text(json.dumps(gate, indent=2))
+    if not gate["passed"]:
+        raise SystemExit(
+            f"VALIDATION GATE FAILED ({gate['reason']}; pearson={gate['pearson']}, "
+            f"rmse={gate.get('rmse')}, n={gate['n']}). Refusing to classify "
+            f"uncharacterized variants. See {out_gate_report}."
+        )
+    return gate
 
 
 def run_validation(cfg: dict, out_ddg_map: str | Path, out_gate_report: str | Path,
@@ -232,10 +267,18 @@ def run_validation(cfg: dict, out_ddg_map: str | Path, out_gate_report: str | Pa
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validation gate + classification (Stage 5).")
     parser.add_argument("--config", default=str(ROOT / "config" / "pipeline.yaml"))
-    parser.add_argument("--out", required=True, help="ddg_map.csv path")
+    parser.add_argument("--out", required=True,
+                        help="ddg_map.csv path, or gate report path with --gate-only")
+    parser.add_argument("--gate-only", action="store_true",
+                        help="evaluate controls only; do not classify variants")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if args.gate_only:
+        gate = run_gate_validation(cfg, args.out)
+        print(f"GATE PASSED (n={gate['n']}): pearson={gate['pearson']:.3f} "
+              f"RMSE={gate['rmse']:.2f} kcal/mol -> {args.out}")
+        return
     gate = run_validation(cfg, args.out, ROOT / cfg["validation"]["outputs"]["gate_report"])
     print(f"GATE PASSED (n={gate['n']}): pearson={gate['pearson']:.3f} "
           f"(min {gate['min_pearson']}), RMSE={gate['rmse']:.2f} kcal/mol "

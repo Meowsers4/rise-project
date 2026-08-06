@@ -256,22 +256,25 @@ def _input_structure(cfg: dict, variant: str, leg: str) -> Path:
 
     in_dir = ROOT / "results" / "fep" / variant / "inputs"
     in_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = in_dir / ".inputs.lock"
+
+    def materialize_once(target: Path, builder) -> Path:
+        """Build one shared input atomically when folded/unfolded tasks overlap."""
+        with open(lock_path, "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if not target.exists():
+                tmp = target.with_suffix(target.suffix + ".tmp")
+                builder(tmp)
+                tmp.replace(target)
+        return target
 
     if leg == "folded":
         target = in_dir / "wt_apo.pdb"
-        if not target.exists():
-            tmp = target.with_suffix(".pdb.tmp")
-            prepare_wt_apo(cfg, variant, tmp)
-            tmp.replace(target)
-        return target
+        return materialize_once(target, lambda tmp: prepare_wt_apo(cfg, variant, tmp))
     if leg == "unfolded":
         wt = _input_structure(cfg, variant, "folded")
         target = in_dir / "tripeptide.pdb"
-        if not target.exists():
-            tmp = target.with_suffix(".pdb.tmp")
-            build_tripeptide(cfg, variant, wt, tmp)
-            tmp.replace(target)
-        return target
+        return materialize_once(target, lambda tmp: build_tripeptide(cfg, variant, wt, tmp))
     raise ValueError(f"unknown leg {leg!r} (expected folded|unfolded)")
 
 
@@ -390,6 +393,9 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
 
     lock_path = sys_dir.parent / ".system.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # Production grompp also needs GMXLIB when this process reuses an existing system;
+    # do this before the marker fast path, not only while constructing the cache.
+    os.environ.update(gmx_env(cfg))
     with open(lock_path, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if (sys_dir / _DONE_MARKER).exists():
@@ -400,10 +406,6 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
             _log(f"discarding incomplete system dir {sys_dir}")
             shutil.rmtree(sys_dir)
         sys_dir.mkdir(parents=True, exist_ok=True)
-
-        # GMXLIB must be visible to every gmx/pmx child process, or pdb2gmx cannot
-        # resolve the pmx force field. One process per window, so it is contained here.
-        os.environ.update(gmx_env(cfg))
 
         record = load_variant_record(ROOT / cfg["panel"]["csv"], variant)
         gmx = gmx_command(cfg)
@@ -516,13 +518,14 @@ def production_mdp(cfg: dict, window: int, seed: int, smoke: bool = False) -> st
     n_states = int(fcfg["lambda_windows"])
     dt_ps = float(fcfg["timestep_fs"]) / 1000.0
     if smoke:
-        nsteps, frames = 500, 10
+        production_steps, frames = 500, 10
         equil_steps = 100
     else:
-        nsteps = int(round(float(fcfg["ns_per_window"]) * 1000.0 / dt_ps))
+        production_steps = int(round(float(fcfg["ns_per_window"]) * 1000.0 / dt_ps))
         frames = int(fcfg["frames_per_window"])
         equil_steps = int(round(float(fcfg["equilibration_ns"]) * 1000.0 / dt_ps))
-    nstdhdl = max(1, nsteps // frames)
+    nsteps = production_steps + equil_steps
+    nstdhdl = max(1, production_steps // frames)
     lambdas = " ".join(f"{i / (n_states - 1):.4f}" for i in range(n_states))
 
     lines = [
@@ -532,7 +535,7 @@ def production_mdp(cfg: dict, window: int, seed: int, smoke: bool = False) -> st
         f"nsteps                   = {nsteps}",
         f"nstcalcenergy            = {nstdhdl}",
         "nstlog                   = 5000",
-        "nstenergy                = 5000",
+        f"nstenergy                = {nstdhdl}",
         "nstxout-compressed       = 0",           # cluster.trajectory_retention: estimates only
         "",
         "; --- neighbour search / electrostatics ---",
@@ -671,6 +674,17 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
                 "u_kn_window": np.zeros((n_states, 0)), "provenance": fcfg["framework"]}
 
     u_kn = dhdl_to_u_kn(run_dir / "dhdl.xvg", float(fcfg["temperature_K"]), n_states)
+    dt_ps = float(fcfg["timestep_fs"]) / 1000.0
+    if smoke:
+        production_steps, frames = 500, 10
+        equil_steps = 100
+    else:
+        production_steps = int(round(float(fcfg["ns_per_window"]) * 1000.0 / dt_ps))
+        frames = int(fcfg["frames_per_window"])
+        equil_steps = int(round(float(fcfg["equilibration_ns"]) * 1000.0 / dt_ps))
+    nstdhdl = max(1, production_steps // frames)
+    discard = (equil_steps + nstdhdl - 1) // nstdhdl
+    u_kn = u_kn[:, discard:]
     if not np.all(np.isfinite(u_kn)):
         bad = int((~np.isfinite(u_kn)).sum())
         raise FloatingPointError(

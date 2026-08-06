@@ -78,6 +78,36 @@ Stage 1 enforces these on an OpenMM topology; the GROMACS path needs its OWN gua
   neighbour and yields a plausible, wrong ΔΔG. `pmx_engine.mutation_resid()` reads the id
   from the actual file and verifies the residue name against the panel's wild type.
 
+## First-light traps — the first real GROMACS+pmx window (2026-08-06)
+Until 2026-08-06 no Stage 3 window had ever run; the smoke test found these in
+order. All are encoded in `pmx_engine.py` / `submit_array.sh` — do not
+reintroduce them:
+1. `pmx mutate` takes `--script`, not `-script`. A single dash is silently
+   dropped by argparse, pmx falls into its interactive residue picker and blocks
+   on stdin (`Enter residue number:`). The engine captures stdout, so it looks
+   like a hang.
+2. No `-ignh` on the hybrid `pdb2gmx` (pmx's own tutorial omits it). With it,
+   pdb2gmx discards pmx's hydrogens and rebuilds them from `mutres.hdb`, which
+   has no entry for hybrid residues (A2V, …) → "N missing atoms" fatal. Keep
+   `-ignh` only on the WT pass.
+3. `OMP_NUM_THREADS` must equal `-ntomp` for mdrun (GROMACS ≥ 2025). SCC shells
+   export `OMP_NUM_THREADS=1`. Set it on the mdrun subprocess env from
+   `cluster.mdrun_ntomp`; exporting it in `scc_env.sh` does not stick (later
+   module/GMXRC sourcing resets it).
+4. Resume flags are conditional: `-cpi X.cpt -append` fails on a fresh run. Pass
+   them only when the checkpoint exists.
+5. System build is serialized with an flock — all array tasks of a (variant, leg)
+   start at once and would `rmtree` each other's half-built system.
+6. `set -u` kills array tasks: GROMACS's `GMXRC` references unbound variables
+   (`$shell`, `$GMXLDLIB`), so `submit_array.sh` must use `set -eo pipefail`
+   (batch must match interactive).
+
+Cost/monitoring: a real folded window is ~15 min on one GPU (A4V w0_r0 = 892.8 s);
+unfolded ~2–3 min. An A4V array (108 windows) is ~16 GPU-hours. `h_rt=12:00:00`
+is per-task, never hit. Progress = count `results/fep/<variant>/**/w*_r*.npz`.
+SGE log files appear when a task STARTS; grep them for python Tracebacks AND bash
+`unbound variable` errors.
+
 ## Results must carry provenance
 Every window records the engine that produced it; `analyze.py` refuses to mix engines or
 accept an unlabelled window; `validate.py` gates only on `provenance == fep.framework`.
@@ -112,6 +142,8 @@ This exists because fabricated ΔΔG files (experimental values + noise) once pr
 - Run `pytest tests/` after touching numbering, panel parsing, or config loading.
 - Dry-run the DAG with `snakemake -n` after changing any rule's inputs/outputs.
 - Report any command you could not run rather than assuming it passed.
+- When diagnosing array failures, grep `logs/fep/` for both `Traceback|ToolError`
+  and `unbound variable` — bash env errors abort before python ever runs.
 
 ## Style
 - Python 3.11+, type hints, docstrings on public functions.
