@@ -33,6 +33,7 @@ GROMACS is an OpenMPI build, so ``mdrun`` runs under ``cluster.mdrun_launcher`` 
 
 from __future__ import annotations
 
+import fcntl
 import os
 import shutil
 import subprocess
@@ -378,96 +379,106 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
     Cached under ``results/fep/<variant>/<leg>/system/`` and marked complete only when
     every stage succeeded, so a half-built directory is never silently reused. Every
     window and replicate of this leg shares it -- MBAR requires one Hamiltonian.
+
+    All array tasks of a (variant, leg) start at once, so the build is serialised with
+    an ``flock``: the first task builds the system, the rest block on the lock and then
+    reuse the cached one. Without the lock two tasks can rmtree each other's half-built
+    system mid-build.
     """
     fcfg, scfg = cfg["fep"], cfg["structure"]
     sys_dir = ROOT / "results" / "fep" / variant / leg / "system"
-    if (sys_dir / _DONE_MARKER).exists():
-        _log(f"reusing cached system {sys_dir}")
+
+    lock_path = sys_dir.parent / ".system.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if (sys_dir / _DONE_MARKER).exists():
+            _log(f"reusing cached system {sys_dir}")
+            return sys_dir
+
+        if sys_dir.exists():                   # previous build died partway
+            _log(f"discarding incomplete system dir {sys_dir}")
+            shutil.rmtree(sys_dir)
+        sys_dir.mkdir(parents=True, exist_ok=True)
+
+        # GMXLIB must be visible to every gmx/pmx child process, or pdb2gmx cannot
+        # resolve the pmx force field. One process per window, so it is contained here.
+        os.environ.update(gmx_env(cfg))
+
+        record = load_variant_record(ROOT / cfg["panel"]["csv"], variant)
+        gmx = gmx_command(cfg)
+        ff = fcfg["pmx_forcefield"]
+        water = scfg["water_model"]
+        wt_pdb = _input_structure(cfg, variant, leg)
+        shutil.copy(wt_pdb, sys_dir / "wt.pdb")
+
+        # Deterministic ion placement: same system for every window/replicate.
+        seed = stable_seed(variant, leg, "system")
+
+        n_sg = _count_cys_pairs(sys_dir / "wt.pdb") if not dry_run else 4
+        ss_answers = _pdb2gmx_stdin(cfg, n_sg)
+        # Hydrogen-mass repartitioning is a pdb2gmx flag in GROMACS, not an .mdp setting.
+        # Off by default: a >2 fs timestep needs it, but combining it with pmx's dummy
+        # masses is untested here (fep.heavyh).
+        heavyh = ["-heavyh"] if fcfg.get("heavyh") else []
+
+        # 1. pdb2gmx FIRST, on the wild type. `pmx mutate -h`: "The best way to use this
+        #    script is to take a pdb/gro file that has been written with pdb2gmx with all
+        #    hydrogen atoms present." Feeding it a raw PDBFixer file makes pmx's reader
+        #    parse zero residues and die in make_chains(). This pass only normalises
+        #    naming and hydrogens to the pmx force field; its topology is discarded.
+        _run([gmx, "pdb2gmx", "-f", "wt.pdb", "-o", "wt_gmx.pdb", "-p", "wt_discard.top",
+              "-ff", ff, "-water", water, "-ignh", "-ss", *heavyh],
+             cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
+
+        # 2. pmx mutate on the pdb2gmx output. The resid is read from THAT file: pdb2gmx
+        #    and PDBFixer renumber, so for the tripeptide the site is the middle residue,
+        #    not mature_pos (mutation_resid also verifies the wild-type identity there).
+        write_mutation_script(cfg, variant, sys_dir / "wt_gmx.pdb", leg,
+                              sys_dir / "mutation.txt", dry_run=dry_run)
+        _run([*pmx_argv(cfg, "mutate"),
+              "-f", "wt_gmx.pdb", "-o", "hybrid.pdb", "-ff", ff,
+              "--script", "mutation.txt"],
+             cwd=sys_dir, dry_run=dry_run)
+
+        # 3. pdb2gmx again, now on the hybrid -- this is the topology we keep.
+        #    No -ignh here: the hybrid residue's hydrogens were built by pmx mutate and
+        #    pdb2gmx has no hdb entry for hybrid residues, so rebuilding them fails.
+        _run([gmx, "pdb2gmx", "-f", "hybrid.pdb", "-o", "conf.gro", "-p", "topol.top",
+              "-ff", ff, "-water", water, "-ss", *heavyh],
+             cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
+
+        # 4. pmx gentop -- write the B-state (mutant) parameters into the topology.
+        _run([*pmx_argv(cfg, "gentop"),
+              "-p", "topol.top", "-o", "hybrid.top", "-ff", ff],
+             cwd=sys_dir, dry_run=dry_run)
+
+        # 4. box, solvent, neutralising ions at the configured ionic strength.
+        _run([gmx, "editconf", "-f", "conf.gro", "-o", "box.gro", "-bt", "cubic",
+              "-d", str(scfg["solvent_padding_nm"]), "-c"], cwd=sys_dir, dry_run=dry_run)
+        _run([gmx, "solvate", "-cp", "box.gro", "-cs", "spc216.gro",
+              "-o", "solv.gro", "-p", "hybrid.top"], cwd=sys_dir, dry_run=dry_run)
+        _write_mdp(sys_dir / "ions.mdp", _minim_mdp(cfg), dry_run=dry_run)
+        _run([gmx, "grompp", "-f", "ions.mdp", "-c", "solv.gro", "-p", "hybrid.top",
+              "-o", "ions.tpr", "-maxwarn", "2"], cwd=sys_dir, dry_run=dry_run)
+        _run([gmx, "genion", "-s", "ions.tpr", "-o", "ions.gro", "-p", "hybrid.top",
+              "-pname", "NA", "-nname", "CL", "-neutral",
+              "-conc", str(scfg["ion_conc_M"]), "-seed", str(seed)],
+             cwd=sys_dir, stdin="SOL\n", dry_run=dry_run)
+
+        # 5. energy minimisation -- also relaxes the freed thiols, which start ~2 A apart
+        #    because the crystal disulfide was broken rather than re-modelled.
+        _write_mdp(sys_dir / "em.mdp", _minim_mdp(cfg), dry_run=dry_run)
+        _run([gmx, "grompp", "-f", "em.mdp", "-c", "ions.gro", "-p", "hybrid.top",
+              "-o", "em.tpr", "-maxwarn", "2"], cwd=sys_dir, dry_run=dry_run)
+        _run([*mdrun_argv(cfg, gpu=False), "-deffnm", "em"], cwd=sys_dir, dry_run=dry_run,
+             env={"OMP_NUM_THREADS": str(cfg["cluster"]["mdrun_ntomp"])})
+
+        if not dry_run:
+            (sys_dir / _DONE_MARKER).write_text(
+                f"variant={variant} leg={leg} ff={ff} seed={seed}\n")
+        _log(f"system ready: {sys_dir}")
         return sys_dir
-
-    if sys_dir.exists():                       # previous build died partway
-        _log(f"discarding incomplete system dir {sys_dir}")
-        shutil.rmtree(sys_dir)
-    sys_dir.mkdir(parents=True, exist_ok=True)
-
-    # GMXLIB must be visible to every gmx/pmx child process, or pdb2gmx cannot resolve
-    # the pmx force field. One process per window, so setting it here is contained.
-    os.environ.update(gmx_env(cfg))
-
-    record = load_variant_record(ROOT / cfg["panel"]["csv"], variant)
-    gmx = gmx_command(cfg)
-    ff = fcfg["pmx_forcefield"]
-    water = scfg["water_model"]
-    wt_pdb = _input_structure(cfg, variant, leg)
-    shutil.copy(wt_pdb, sys_dir / "wt.pdb")
-
-    # Deterministic ion placement: same system for every window/replicate of this leg.
-    seed = stable_seed(variant, leg, "system")
-
-    n_sg = _count_cys_pairs(sys_dir / "wt.pdb") if not dry_run else 4
-    ss_answers = _pdb2gmx_stdin(cfg, n_sg)
-    # Hydrogen-mass repartitioning is a pdb2gmx flag in GROMACS, not an .mdp setting.
-    # Off by default: a >2 fs timestep needs it, but combining it with pmx's dummy-atom
-    # masses is untested here (fep.heavyh).
-    heavyh = ["-heavyh"] if fcfg.get("heavyh") else []
-
-    # 1. pdb2gmx FIRST, on the wild type. `pmx mutate -h`: "The best way to use this
-    #    script is to take a pdb/gro file that has been written with pdb2gmx with all
-    #    hydrogen atoms present." Feeding it a raw PDBFixer file makes pmx's reader parse
-    #    zero residues and die in make_chains(). This pass only normalises naming and
-    #    hydrogens to the pmx force field; its topology is discarded.
-    _run([gmx, "pdb2gmx", "-f", "wt.pdb", "-o", "wt_gmx.pdb", "-p", "wt_discard.top",
-          "-ff", ff, "-water", water, "-ignh", "-ss", *heavyh],
-         cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
-
-    # 2. pmx mutate on the pdb2gmx output. The resid is read from THAT file: pdb2gmx and
-    #    PDBFixer renumber, so for the tripeptide the site is the middle residue, not
-    #    mature_pos (mutation_resid also verifies the wild-type identity there).
-    write_mutation_script(cfg, variant, sys_dir / "wt_gmx.pdb", leg,
-                          sys_dir / "mutation.txt", dry_run=dry_run)
-    _run([*pmx_argv(cfg, "mutate"),
-          "-f", "wt_gmx.pdb", "-o", "hybrid.pdb", "-ff", ff,
-          "--script", "mutation.txt"],
-         cwd=sys_dir, dry_run=dry_run)
-
-    # 3. pdb2gmx again, now on the hybrid -- this is the topology we keep.
-    #    No -ignh here: the hybrid residue's hydrogens were built by pmx mutate and
-    #    pdb2gmx has no hdb entry for hybrid residues, so rebuilding them fails.
-    _run([gmx, "pdb2gmx", "-f", "hybrid.pdb", "-o", "conf.gro", "-p", "topol.top",
-          "-ff", ff, "-water", water, "-ss", *heavyh],
-         cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
-
-    # 4. pmx gentop -- write the B-state (mutant) parameters into the topology.
-    _run([*pmx_argv(cfg, "gentop"),
-          "-p", "topol.top", "-o", "hybrid.top", "-ff", ff],
-         cwd=sys_dir, dry_run=dry_run)
-
-    # 4. box, solvent, neutralising ions at the configured ionic strength.
-    _run([gmx, "editconf", "-f", "conf.gro", "-o", "box.gro", "-bt", "cubic",
-          "-d", str(scfg["solvent_padding_nm"]), "-c"], cwd=sys_dir, dry_run=dry_run)
-    _run([gmx, "solvate", "-cp", "box.gro", "-cs", "spc216.gro",
-          "-o", "solv.gro", "-p", "hybrid.top"], cwd=sys_dir, dry_run=dry_run)
-    _write_mdp(sys_dir / "ions.mdp", _minim_mdp(cfg), dry_run=dry_run)
-    _run([gmx, "grompp", "-f", "ions.mdp", "-c", "solv.gro", "-p", "hybrid.top",
-          "-o", "ions.tpr", "-maxwarn", "2"], cwd=sys_dir, dry_run=dry_run)
-    _run([gmx, "genion", "-s", "ions.tpr", "-o", "ions.gro", "-p", "hybrid.top",
-          "-pname", "NA", "-nname", "CL", "-neutral",
-          "-conc", str(scfg["ion_conc_M"]), "-seed", str(seed)],
-         cwd=sys_dir, stdin="SOL\n", dry_run=dry_run)
-
-    # 5. energy minimisation -- also relaxes the freed thiols, which start ~2 A apart
-    #    because the crystal disulfide was broken rather than re-modelled.
-    _write_mdp(sys_dir / "em.mdp", _minim_mdp(cfg), dry_run=dry_run)
-    _run([gmx, "grompp", "-f", "em.mdp", "-c", "ions.gro", "-p", "hybrid.top",
-          "-o", "em.tpr", "-maxwarn", "2"], cwd=sys_dir, dry_run=dry_run)
-    _run([*mdrun_argv(cfg, gpu=False), "-deffnm", "em"], cwd=sys_dir, dry_run=dry_run,
-         env={"OMP_NUM_THREADS": str(cfg["cluster"]["mdrun_ntomp"])})
-
-    if not dry_run:
-        (sys_dir / _DONE_MARKER).write_text(
-            f"variant={variant} leg={leg} ff={ff} seed={seed}\n")
-    _log(f"system ready: {sys_dir}")
-    return sys_dir
 
 
 # --------------------------------------------------------------------------- #
