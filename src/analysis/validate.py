@@ -116,7 +116,7 @@ def evaluate_gate(fep: dict[str, dict], exp: dict[str, float], cfg: dict) -> dic
     min_points = vcfg.get("min_gate_points", 3)
 
     used, excluded = [], []
-    pred, obs = [], []
+    pred, obs, closures = [], [], []
     for v in subset:
         if v not in fep or v not in exp:
             excluded.append({"variant": v, "reason": "missing FEP or experimental value"})
@@ -135,6 +135,7 @@ def evaluate_gate(fep: dict[str, dict], exp: dict[str, float], cfg: dict) -> dic
         used.append(v)
         pred.append(rec["ddg"])
         obs.append(exp[v])
+        closures.append(abs(float(rec["cycle_closure_kcal"])))
 
     n = len(used)
     if n < min_points:
@@ -147,18 +148,34 @@ def evaluate_gate(fep: dict[str, dict], exp: dict[str, float], cfg: dict) -> dic
     spearman = _spearman(pred_a, obs_a)
     acc = accuracy_metrics(pred_a, obs_a)
 
+    # Median |hysteresis| over the SET. The per-variant cap above throws out one bad
+    # variant; this stops a gate passing on variants that each just squeak under it.
+    # Pre-registered in config (README §2.2) and carries claim C2.
+    median_closure = float(np.median(closures))
+    max_median_closure = vcfg.get("max_median_cycle_closure_kcal")
+
     max_rmse = vcfg.get("max_rmse_kcal")          # optional second criterion
     checks = {"pearson": pearson >= min_pearson}
     if max_rmse is not None:
         checks["rmse"] = acc["rmse"] <= max_rmse
+    if max_median_closure is not None:
+        checks["median_cycle_closure"] = median_closure <= max_median_closure
     passed = all(checks.values())
     failed = [k for k, ok in checks.items() if not ok]
     reason = "correlation and accuracy criteria met" if passed else \
              f"failed on: {', '.join(failed)}"
 
+    # README §10: r below the pivot threshold is not a "try again" -- it is a signal to
+    # reframe as a methods/sampling-limits result. Surface it rather than burying it.
+    pivot = vcfg.get("pivot_pearson")
+    pivot_triggered = bool(pivot is not None and pearson < pivot)
+
     return {"passed": bool(passed), "reason": reason,
             "pearson": pearson, "spearman": spearman, **acc, "n": n,
             "min_pearson": min_pearson, "max_rmse_kcal": max_rmse,
+            "median_cycle_closure_kcal": median_closure,
+            "max_median_cycle_closure_kcal": max_median_closure,
+            "pivot_pearson": pivot, "pivot_triggered": pivot_triggered,
             "used": used, "excluded": excluded}
 
 

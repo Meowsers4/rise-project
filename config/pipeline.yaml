@@ -71,7 +71,13 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
                             # neighbour overlap comes from window density alone. Cutting to
                             # 12 is the one economy that biases ddG rather than just adding
                             # noise -- cut replicates/length first.
-  replicates: 3             # >=3 required (README). 3 = the FLOOR, do not go lower.
+  replicates: 3             # >=3 required. 3 = the FLOOR, do not go lower.
+                            # PENDING 3 -> 5: README §9 resolved replicates at 5. NOT changed
+                            # yet because every running array task re-reads this file and
+                            # submit_array.sh aborts when legs*windows*replicates disagrees
+                            # with SGE_TASK_LAST -- bumping it mid-flight kills the array.
+                            # Raise it only between arrays; r3/r4 are then additive (72 new
+                            # tasks per variant), not a rerun.
   legs:                     # thermodynamic cycle
     - folded                # mutation in the folded protein
     - unfolded              # mutation in capped tripeptide reference
@@ -149,7 +155,21 @@ md:                         # Stage 4 — unbiased mechanism MD (GPU, subset)
 
 validation:                 # Stage 5 — the GATE (README §2.2)
   gate_on: positive_control
-  min_pearson: 0.6          # go/no-go threshold vs experimental ddG
+  # PRE-REGISTERED 2026-08-07, before any gate evaluation (README §2.2). Do not tune
+  # these after seeing results -- that is the whole point of fixing them here.
+  min_pearson: 0.70         # go/no-go threshold vs experimental ddG. Raised from 0.6 by the
+                            # literature audit: Wells 2021 reported 0.81 on 10 variants with
+                            # the same toolchain, so 0.6 is not a defensible bar. README §10
+                            # treats r < 0.60 as the PIVOT trigger (methods paper), which is a
+                            # different number from the pass mark -- do not conflate them.
+  pivot_pearson: 0.60       # below this, stop and reframe (README §10) rather than retune.
+  max_median_cycle_closure_kcal: 0.75
+                            # Median |forward-reverse hysteresis| across the usable gate
+                            # variants. fep.convergence.max_cycle_closure_kcal (1.0) excludes
+                            # an INDIVIDUAL bad variant; this bounds the SET, so a gate cannot
+                            # pass on variants that each squeak under the per-variant cap.
+                            # Carries claim C2 (apo-2SH convergence), so it is a gate
+                            # criterion, not a warning.
   ddg_sign: positive_destabilizing  # exp_ddg AND FEP ddG: positive = destabilizing.
                                      # src/fep must emit this sign so gate Pearson is positive.
   ddg_gate_column: exp_ddg  # apo-MONOMER ddG is the gate value; exp_ddg_dimer is a
@@ -158,12 +178,17 @@ validation:                 # Stage 5 — the GATE (README §2.2)
   # M3 validates on this 8-variant subset BEFORE scaling to the full 54 controls.
   # Every entry must exist in the controls (build.py enforces).
   #
-  # CHARGE-NEUTRAL ONLY (resolved 2026-07-26). A mutation that changes net charge carries
-  # a PME finite-size artifact that does NOT cancel between the folded and unfolded legs
-  # (different box sizes), worth a few kcal/mol against a 0-7 kcal/mol signal. The engine
-  # drives Perses' lower-level API, which has no counterion co-alchemy, so charge-changing
-  # variants (G93D, G93R, D90A, D101N, H46R, N139K) are OUT of the gate until that is
-  # handled. 37 of the 54 controls are charge-neutral, so this costs nothing in coverage.
+  # CHARGE-NEUTRAL ONLY (resolved 2026-07-26; still true for THIS gate). A mutation that
+  # changes net charge carries a PME finite-size artifact that does NOT cancel between the
+  # folded and unfolded legs (different box sizes), worth a few kcal/mol against a 0-7
+  # kcal/mol signal. The pmx engine has no counterion co-alchemy, so charge-changing
+  # variants are OUT of this gate. 37 of the 54 controls are charge-neutral.
+  #
+  # NOTE (2026-08-07 audit): charge-changing variants are no longer merely deferred --
+  # covering them is claim C1, the project's strongest surviving methods claim (README
+  # §11.3), and they get their own SUB-GATE (README §5 Stage 5) once net-charge handling
+  # exists. 17 charge-changing positive controls carry experimental ddG and form that
+  # sub-gate's validation set. Keep them out of charge_neutral_gate_subset regardless.
   #
   # Spread: -0.20 .. 7.00 kcal/mol. G93A/G93S/G93V is a same-site ladder (2.43/3.70/7.00)
   # that doubles as an internal consistency check.

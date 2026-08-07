@@ -19,12 +19,16 @@ is the single source of truth for the panel.
    parameterized arm, not a config flag or a refactor.
 2. **The validation gate is go/no-go.** Do not run FEP on uncharacterized variants
    until FEP reproduces the experimental ΔΔG of the positive controls above
-   `validation.min_pearson` AND within `validation.max_rmse_kcal`. Never bypass or lower
-   either threshold to "make progress". The gate subset is **charge-neutral only**: a
-   mutation that changes net charge carries a PME finite-size artifact that does not
-   cancel between the folded and unfolded legs (different box sizes), and the engine has
-   no counterion co-alchemy. Adding a charge-changing variant to the gate requires
-   solving that first.
+   `validation.min_pearson` AND within `validation.max_rmse_kcal` AND with a median
+   |cycle closure| under `validation.max_median_cycle_closure_kcal`. All three are
+   **pre-registered** (fixed 2026-08-07, before any gate evaluation) — never bypass,
+   lower, or "temporarily relax" one to make progress; that destroys the only thing
+   pre-registration buys. `validation.pivot_pearson` is a *different* number: falling
+   below it means reframe per README §10, not retune. The gate subset is
+   **charge-neutral only**: a net-charge change carries a PME finite-size artifact that
+   does not cancel between the folded and unfolded legs (different box sizes), and the
+   pmx engine has no counterion co-alchemy. Charge-changing variants get their own
+   **sub-gate** once that is solved — see rule 6.
 3. **Mature numbering.** Variant names use mature (153-residue) numbering; the
    precursor has an extra N-terminal Met. The offset lives ONLY in
    `pipeline.yaml:project.mature_offset`. Never hardcode residue indices anywhere.
@@ -32,7 +36,20 @@ is the single source of truth for the panel.
 4. **No parameters in code.** Read everything from `config/pipeline.yaml`. If a value
    is missing or `TODO`, ask the user rather than inventing a default.
 5. **Replicates and error bars are mandatory** for any free-energy result. A ΔΔG
-   without an uncertainty and a cycle-closure check is not a result.
+   without an uncertainty and a cycle-closure check is not a result. `fep.replicates`
+   is pending a 3 → 5 raise (README §9). Do NOT raise it while an array is in flight:
+   every task re-reads this config and `submit_array.sh` aborts when
+   `legs*windows*replicates` disagrees with `SGE_TASK_LAST`. Raise it between arrays;
+   r3/r4 are then additive (72 new tasks per variant), not a rerun.
+6. **Four claims are load-bearing** (README §2.3): C1 charge-changing coverage,
+   C2 apo-2SH convergence, C3 DMS-independent VUS triage, C4 concordance/discordance.
+   Weakening one is a scope change needing the user's sign-off, not a refactor. Two
+   consequences bind day-to-day work: convergence diagnostics must be **written at run
+   time** to `results/convergence/<variant>.json` (C2 cannot be claimed retroactively
+   from uninstrumented runs), and charge-changing variants are no longer merely deferred
+   — covering them is the project's strongest methods claim. Never write "first",
+   "novel FEP protocol", or "we show SOD1 variants are destabilizing": all three are
+   occupied by Wells 2021, which used **this same toolchain** (README §11.2).
 
 ## Stage 3 stack — RESOLVED, do not relitigate
 **GROMACS + pmx.** Not OpenMM+Perses. A research spike (2026-07-21) proved perses

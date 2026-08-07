@@ -140,6 +140,26 @@ def mbar_leg_dg_kT(u_kn: np.ndarray, N_k: np.ndarray) -> tuple[float, float]:
     return float(res["Delta_f"][0, -1]), float(res["dDelta_f"][0, -1])
 
 
+def mbar_leg_overlap(u_kn: np.ndarray, N_k: np.ndarray) -> tuple[list[list[float]], float]:
+    """MBAR phase-space overlap matrix and the worst adjacent-window overlap.
+
+    The nearest-neighbour diagonal is what decides whether a lambda ladder is dense
+    enough: if adjacent windows barely overlap, MBAR's estimate is an extrapolation and
+    its error bar understates the truth. Reported per (leg, replicate) because claim C2
+    (apo-2SH convergence, README §2.3) cannot be argued retroactively.
+
+    Returns:
+        ``(matrix, min_adjacent)`` -- the full overlap matrix as nested lists (JSON-safe)
+        and the smallest ``O[k, k+1]``.
+    """
+    from pymbar import MBAR
+
+    mbar = MBAR(u_kn, N_k)
+    o = np.asarray(mbar.compute_overlap()["matrix"], dtype=float)
+    adjacent = [float(o[k, k + 1]) for k in range(o.shape[0] - 1)]
+    return o.tolist(), (min(adjacent) if adjacent else float("nan"))
+
+
 def leg_hysteresis_kT(per_window: list[np.ndarray]) -> float:
     """|forward - reverse| Zwanzig estimate across the ladder (kT), a convergence proxy."""
     n_states = len(per_window)
@@ -188,6 +208,7 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
 
     decorrelate = bool(fcfg.get("decorrelate", True))
     per_rep_ddg, per_rep_stat_var, hysteresis_kcal = [], [], []
+    diagnostics: list[dict] = []
     n_raw_total = n_used_total = 0
     for rep in range(n_reps):
         leg_dg, leg_var = {}, {}
@@ -199,7 +220,17 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
             dg_kT, ddg_kT = mbar_leg_dg_kT(u_kn, N_k)
             leg_dg[leg] = dg_kT * kT
             leg_var[leg] = (ddg_kT * kT) ** 2
-            hysteresis_kcal.append(leg_hysteresis_kT(per_window) * kT)
+            leg_hyst = leg_hysteresis_kT(per_window) * kT
+            hysteresis_kcal.append(leg_hyst)
+            overlap, min_adjacent = mbar_leg_overlap(u_kn, N_k)
+            diagnostics.append({
+                "leg": leg, "replicate": rep,
+                "dg_kcal": leg_dg[leg], "dg_err_kcal": float(ddg_kT * kT),
+                "hysteresis_kcal": leg_hyst,
+                "min_adjacent_overlap": min_adjacent,
+                "samples_per_window": [int(n) for n in N_k],
+                "overlap_matrix": overlap,
+            })
         # ΔΔG = folded - unfolded (positive = destabilizing)
         per_rep_ddg.append(leg_dg["folded"] - leg_dg["unfolded"])
         per_rep_stat_var.append(leg_var["folded"] + leg_var["unfolded"])
@@ -226,6 +257,27 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2))
+
+    # Claim C2 depends on these being persisted at run time, not reconstructed later
+    # (README §2.3, §5). One file per variant, alongside the ddG. Sited relative to
+    # fep_dir -- NOT to ROOT -- so a test pointing fep_dir at a tmp path does not write
+    # into the real results tree.
+    conv_dir = fep_dir.parent / "convergence"
+    conv_dir.mkdir(parents=True, exist_ok=True)
+    (conv_dir / f"{variant}.json").write_text(json.dumps({
+        "variant": variant,
+        "provenance": provenance,
+        "ddg": ddg,
+        "ddg_err": ddg_err,
+        "per_replicate_ddg": [float(x) for x in per_rep_ddg],
+        "replicate_spread_kcal": float(np.ptp(per_rep_ddg)) if n_reps > 1 else 0.0,
+        "replicate_sem_kcal": rep_sem,
+        "cycle_closure_kcal": cycle_closure,
+        "max_cycle_closure_kcal": max_closure,
+        "converged": converged,
+        "min_adjacent_overlap": min(d["min_adjacent_overlap"] for d in diagnostics),
+        "legs": diagnostics,
+    }, indent=2))
     return result
 
 

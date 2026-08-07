@@ -67,6 +67,38 @@ def test_gate_excludes_unconverged_and_enforces_floor():
     assert {e["variant"] for e in gate["excluded"]} >= {"B", "C"}
 
 
+def test_gate_fails_on_median_hysteresis_even_when_each_variant_passes():
+    """Pre-registered set-level bound (README §2.2, claim C2).
+
+    Every variant here sits UNDER the per-variant cap of 1.0, so the old gate would have
+    passed on a near-perfect correlation. The median bound is what catches a ladder that
+    is uniformly marginal rather than individually broken.
+    """
+    cfg = {**CFG, "validation": {**CFG["validation"],
+                                 "max_median_cycle_closure_kcal": 0.75}}
+    exp = {"A": 1.0, "B": 2.0, "C": 4.0, "D": 7.0}
+    fep = {v: _fep(exp[v] + 0.2, closure=0.95) for v in exp}
+    gate = evaluate_gate(fep, exp, cfg)
+    assert gate["pearson"] > 0.99          # correlation alone would have passed it
+    assert not gate["passed"]
+    assert gate["median_cycle_closure_kcal"] == pytest.approx(0.95)
+    assert "median_cycle_closure" in gate["reason"]
+
+    # ...and it passes once the set is actually tight.
+    tight = {v: _fep(exp[v] + 0.2, closure=0.2) for v in exp}
+    assert evaluate_gate(tight, exp, cfg)["passed"]
+
+
+def test_gate_reports_pivot_trigger_without_silently_retuning():
+    """README §10: r below the pivot line is a reframing signal, not a retune prompt."""
+    cfg = {**CFG, "validation": {**CFG["validation"], "pivot_pearson": 0.60}}
+    exp = {"A": 1.0, "B": 2.0, "C": 4.0, "D": 7.0}
+    fep = {"A": _fep(7.0), "B": _fep(1.0), "C": _fep(6.0), "D": _fep(2.0)}
+    gate = evaluate_gate(fep, exp, cfg)
+    assert not gate["passed"] and gate["pivot_triggered"] is True
+    assert gate["min_pearson"] == cfg["validation"]["min_pearson"]   # unchanged by failure
+
+
 def test_gate_excludes_mock_provenance():
     """A mock ΔΔG must never reach the gate, however good the correlation looks."""
     exp = {"A": 1.0, "B": 2.0, "C": 4.0, "D": 7.0}
