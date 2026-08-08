@@ -113,3 +113,40 @@ def test_controls_floor_enforced():
     rows = [{"bucket": "positive_control"}]  # only 1, floor is 2
     with pytest.raises(ValueError, match="positive controls"):
         _check_controls_floor(rows, CFG)
+
+
+def test_panel_rebuild_preserves_the_audit_columns():
+    """rule panel regenerates variants.csv wholesale from OUTPUT_FIELDS.
+
+    A column missing from the writer is silently deleted on the next rebuild. That is
+    what happened to charge_change / wells2021 / axakova_class, which carry claim C1,
+    the Wells-10 head-to-head, and claim C3 respectively.
+    """
+    from src.panel.build import OUTPUT_FIELDS, audit_columns
+
+    for col in ("charge_change", "wells2021", "axakova_class"):
+        assert col in OUTPUT_FIELDS, f"{col} would be dropped by a panel rebuild"
+
+    # derived, not hand-maintained
+    assert audit_columns("D90A", "D", "A")["charge_change"] == "true"
+    assert audit_columns("A4V", "A", "V")["charge_change"] == "false"
+    assert audit_columns("H46R", "H", "R")["charge_change"] == "true"   # His = neutral
+    assert audit_columns("A4V", "A", "V")["wells2021"] == "true"
+    assert audit_columns("G93V", "G", "V")["wells2021"] == "false"
+
+
+def test_committed_panel_is_reproducible_from_its_sources():
+    """data/variants.csv must equal what a rebuild produces.
+
+    Otherwise a Snakemake rebuild silently changes the panel underneath the gate.
+    """
+    import tempfile
+
+    from src.panel.build import build_panel, load_config
+
+    cfg = load_config(ROOT / "config" / "pipeline.yaml")
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "variants.csv"
+        build_panel(cfg, out)
+        assert out.read_text() == (ROOT / "data" / "variants.csv").read_text(), \
+            "data/variants.csv is stale relative to its build inputs"

@@ -30,6 +30,7 @@ FEP_CFG = {
     }
 }
 _KT = _KB_KCAL * 298.15
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _write_oscillator_leg(fep_dir: Path, variant: str, leg: str, dG_kT: float,
@@ -72,6 +73,33 @@ def test_real_window_requires_validation_gate(tmp_path, monkeypatch):
     }
     with pytest.raises(RuntimeError, match="validation gate"):
         run_window(cfg, "G93A", "folded", 0, 0, tmp_path / "window.npz")
+
+
+def test_analyze_refuses_to_mix_protocols_end_to_end(tmp_path):
+    """The guard must be WIRED, not merely present.
+
+    An earlier version collected protocols through a mutable out-parameter; deleting the
+    argument at the call site disabled the whole check and every test still passed. This
+    goes through analyze_variant with real files on disk, so the collection path itself
+    is exercised.
+    """
+    from src.fep.analyze import analyze_variant
+
+    cfg = {**FEP_CFG, "fep": {**FEP_CFG["fep"], "lambda_windows": 4, "replicates": 1,
+                              "decorrelate": False}}
+    fep_dir = tmp_path / "fep"
+    for leg in ("folded", "unfolded"):
+        d = fep_dir / "A4V" / leg
+        d.mkdir(parents=True)
+        for w in range(4):
+            # one window disagrees about the .mdp it was produced with
+            proto = "PULLED_MIDWAY" if (leg, w) == ("folded", 2) else "abc123"
+            np.savez(d / f"w{w}_r0.npz", lambda_index=w, n_states=4,
+                     u_kn_window=np.zeros((4, 50)), provenance="openmm_perses",
+                     protocol=proto)
+    with pytest.raises(ValueError, match="different protocols"):
+        analyze_variant(cfg, "A4V", tmp_path / "ddg.json", fep_dir=fep_dir)
+    assert not (tmp_path / "ddg.json").exists()   # and no result is written
 
 
 def test_analyze_refuses_to_mix_protocols():
@@ -287,3 +315,52 @@ def test_pmx_ff_dir_explicit_config_wins(monkeypatch, tmp_path):
     _fake_pmx(monkeypatch, tmp_path, {"mutff": ["amber99sb-star-ildn-mut"]})
     cfg = {"fep": {"pmx_ff_dir": "/opt/custom/ff", "pmx_forcefield": "x"}}
     assert pmx_ff_dir(cfg) == Path("/opt/custom/ff")
+
+
+def test_protocol_fingerprint_is_seed_and_window_invariant_but_settings_sensitive():
+    """Guards the exclusion list in run_pmx_window's fingerprint.
+
+    If the excluded lines ever stop matching, every replicate hashes differently and
+    _check_single_protocol rejects EVERY variant -- after the GPU time is already spent.
+    If they exclude too much, a real settings change stops being detected.
+    """
+    import copy
+    import yaml
+    from src.fep.pmx_engine import production_mdp, protocol_fingerprint
+
+    cfg = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))
+
+    def fp(c, window, seed):
+        # call the PRODUCTION helper -- an earlier version of this test recomputed the
+        # hash inline, so breaking the exclusion list in the engine changed nothing here.
+        return protocol_fingerprint(production_mdp(c, window, seed))
+
+    assert fp(cfg, 0, 1) == fp(cfg, 17, 999)        # replicates/windows must agree
+
+    off = copy.deepcopy(cfg)
+    off["fep"]["sc_alpha"] = 0.5                    # a real protocol change must not
+    assert fp(off, 0, 1) != fp(cfg, 0, 1)           # hash the same
+
+    coarse = copy.deepcopy(cfg)
+    coarse["fep"]["frames_per_window"] = 150
+    assert fp(coarse, 0, 1) != fp(cfg, 0, 1)
+
+
+def test_pre_registered_thresholds_are_not_quietly_lowered():
+    """CLAUDE.md rule 2 / HANDOFF standing rule, enforced mechanically.
+
+    These were pre-registered 2026-08-07 before any gate evaluation. Until this test
+    existed the suite passed with min_pearson set to 0.10.
+    """
+    import yaml
+
+    v = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))["validation"]
+    f = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))["fep"]
+    assert v["min_pearson"] == 0.70
+    assert v["max_rmse_kcal"] == 1.5
+    assert v["max_median_cycle_closure_kcal"] == 0.75
+    assert v["pivot_pearson"] == 0.60
+    # internal coherence: the pivot line sits below the pass mark, and the set-level
+    # hysteresis bound is tighter than the per-variant cap it complements.
+    assert v["pivot_pearson"] < v["min_pearson"]
+    assert v["max_median_cycle_closure_kcal"] <= f["convergence"]["max_cycle_closure_kcal"]

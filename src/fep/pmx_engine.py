@@ -592,6 +592,28 @@ def _minim_mdp(cfg: dict, window: int | None = None) -> str:
     return "\n".join(lines)
 
 
+_FINGERPRINT_IGNORED_PREFIXES = ("gen-seed", "ld-seed", "init-lambda-state", ";")
+
+
+def protocol_fingerprint(mdp_text: str) -> str:
+    """Hash of the settings a window was run under, ignoring seed and lambda state.
+
+    `provenance` records the ENGINE. It cannot see `sc-coul` flipping or `nstdhdl`
+    changing halfway through a variant -- which is what `git pull`ing the cluster during
+    a running array produces. Mixing those inside one MBAR estimate is silent and wrong,
+    so every window carries this and :func:`src.fep.analyze._check_single_protocol`
+    refuses a variant whose windows disagree.
+
+    Seed and `init-lambda-state` are excluded so replicates and windows of ONE protocol
+    agree; comments are excluded so re-wording a comment is not a protocol change.
+    """
+    body = "\n".join(
+        line for line in mdp_text.splitlines()
+        if not line.startswith(_FINGERPRINT_IGNORED_PREFIXES)
+    )
+    return hashlib.sha256(body.encode()).hexdigest()[:16]
+
+
 def production_mdp(cfg: dict, window: int, seed: int, smoke: bool = False) -> str:
     """The production ``.mdp`` for one lambda window.
 
@@ -735,11 +757,7 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     # is exactly the class of error the provenance rule exists to prevent. The seed is
     # excluded so replicates of one protocol still agree.
     mdp_text = production_mdp(cfg, window, seed, smoke)
-    fingerprint = "\n".join(
-        line for line in mdp_text.splitlines()
-        if not line.startswith(("gen-seed", "ld-seed", "init-lambda-state", ";"))
-    )
-    protocol = hashlib.sha256(fingerprint.encode()).hexdigest()[:16]
+    protocol = protocol_fingerprint(mdp_text)
     _write_mdp(run_dir / "prod.mdp", mdp_text, dry_run)
 
     _run([gmx, "grompp", "-f", "prod.mdp",

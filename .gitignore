@@ -5,3 +5,6 @@ __pycache__/
 .snakemake/
 .DS_Store
 .pytest_cache/
+
+# SGE task logs (108 per array)
+logs/

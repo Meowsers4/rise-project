@@ -102,10 +102,15 @@ export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
 # no-drift rule as the module names above. The literal probe is only a fallback for when
 # the repo is not importable yet (e.g. PYTHONPATH not picked up).
 if python -c "import pmx" >/dev/null 2>&1; then
+  # `|| true`: this file is SOURCED into submit_array.sh, which runs `set -e`. A bare
+  # VAR=$(cmd) propagates the substitution's exit status, so a raising pmx_ff_dir() (broken
+  # install, missing fep.pmx_forcefield, wrong PWD) would abort EVERY array task at source
+  # time -- silently, because stderr is discarded -- and the literal fallback below could
+  # never run. Let it fail into an empty string and take the fallback instead.
   GMXLIB="$(python -c "
 from src.prep.build import load_config
 from src.fep.pmx_engine import pmx_ff_dir
-print(pmx_ff_dir(load_config('${_SCC_CONFIG}')))" 2>/dev/null)"
+print(pmx_ff_dir(load_config('${_SCC_CONFIG}')))" 2>/dev/null || true)"
   if [[ -z "${GMXLIB}" || ! -d "${GMXLIB}" ]]; then
     GMXLIB="$(python -c "
 import os, pmx
@@ -114,7 +119,7 @@ for name in ('mutff45', 'mutff'):
     path = os.path.join(data, name)
     if os.path.isdir(path):
         print(path)
-        break" 2>/dev/null)"
+        break" 2>/dev/null || true)"
   fi
   if [[ -d "${GMXLIB}" ]]; then export GMXLIB; else unset GMXLIB; fi
 fi

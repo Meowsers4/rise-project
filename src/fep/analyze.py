@@ -115,24 +115,25 @@ def load_leg_replicate(fep_dir: Path, variant: str, leg: str, rep: int, n_states
 
 
 def collect_provenance(fep_dir: Path, variant: str, legs: list[str], n_reps: int,
-                       n_states: int, protocols: set[str] | None = None) -> set[str]:
+                       n_states: int) -> tuple[set[str], set[str]]:
     """Engine tags across every window of ``variant``, read without loading the samples.
 
     Runs before any MBAR work so a provenance problem is reported immediately rather than
     after minutes of computation on numbers that were never going to be usable.
 
-    Args:
-        protocols: optional set collecting each window's mdp fingerprint. Provenance says
-            *which engine*; the fingerprint says *which settings*. Windows can share an
-            engine and still be unmixable -- e.g. half a variant run before ``sc-coul``
-            was enabled and half after.
+    Returns:
+        ``(provenances, protocols)``. Provenance says *which engine*; the protocol
+        fingerprint says *which settings*. Windows can share an engine and still be
+        unmixable -- e.g. half a variant run before ``sc-coul`` was enabled and half
+        after. Returned rather than collected through an out-parameter so a caller
+        cannot drop the protocol set and silently disable the mixing guard.
 
     Raises:
         ValueError: If any window carries no provenance -- which is what a hand-written
             or pre-provenance file looks like, and is never trustworthy.
     """
     provenances: set[str] = set()
-    protocols = protocols if protocols is not None else set()
+    protocols: set[str] = set()
     for leg in legs:
         for rep in range(n_reps):
             for w in range(n_states):
@@ -147,7 +148,7 @@ def collect_provenance(fep_dir: Path, variant: str, legs: list[str], n_reps: int
                     provenances.add(str(npz["provenance"]))
                     protocols.add(str(npz["protocol"]) if "protocol" in npz
                                   else _UNLABELLED_PROTOCOL)
-    return provenances
+    return provenances, protocols
 
 
 def mbar_leg_dg_kT(u_kn: np.ndarray, N_k: np.ndarray) -> tuple[float, float]:
@@ -245,8 +246,7 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
     max_closure = fcfg["convergence"]["max_cycle_closure_kcal"]
 
     # Establish provenance for the whole variant BEFORE computing anything with it.
-    protocols: set[str] = set()
-    provenances = collect_provenance(fep_dir, variant, legs, n_reps, n_states, protocols)
+    provenances, protocols = collect_provenance(fep_dir, variant, legs, n_reps, n_states)
     _check_single_provenance(variant, provenances)
     _check_single_protocol(variant, protocols)
     provenance = provenances.pop()

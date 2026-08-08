@@ -37,6 +37,9 @@
 set -eo pipefail
 
 : "${VARIANT:?set VARIANT, e.g. qsub -v VARIANT=A4V scripts/submit_array.sh}"
+# -u is off (GMXRC reads unbound vars), so an unset SGE_TASK_ID would arithmetic to
+# idx=-1 -> rep=-1 and cheerfully write w0_r-1.npz. This script is only ever a task body.
+: "${SGE_TASK_ID:?not running as an SGE array task -- submit with qsub, do not run directly}"
 
 # -cwd above runs the task in the SUBMIT directory. Without it SGE starts in $HOME and
 # every relative path here (CONFIG, results/, -o logs/fep/) silently points at the wrong

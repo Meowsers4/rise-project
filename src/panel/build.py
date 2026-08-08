@@ -51,11 +51,47 @@ OUTPUT_FIELDS = [
     "measured_state",
     "clinvar_id",
     "oligomer",
+    # Added by the 2026-08-07 literature audit (README §4 Stage 0). These MUST stay in the
+    # writer: rule panel regenerates variants.csv wholesale, so a column missing here is
+    # silently deleted on the next rebuild, taking claim C1 (charge_change), the Wells-10
+    # head-to-head (wells2021) and C3 (axakova_class) with it.
+    "charge_change",
+    "wells2021",
+    "axakova_class",
 ]
 
 # Default experimental error (kcal/mol) when a controls row leaves exp_ddg_err blank
 # (Kumar2017 Table S1 stated methodological error).
 _DEFAULT_DDG_ERR = "0.30"
+
+# --- audit columns (README §4 Stage 0, added 2026-08-07) ------------------------------
+# Wells NGM et al., Protein Science 2021;30(9):1804 -- the 10 charge-conserving variants
+# that study covered. Our head-to-head comparison set (claim C2 / milestone M3.5).
+_WELLS_2021 = frozenset(
+    ("A4V", "A4S", "A4T", "L38V", "G41S", "G93A", "G93S", "I113T", "V148G", "V148I")
+)
+# Formal side-chain charge at pH 7. His is NEUTRAL here (pKa ~6.0), which matches what the
+# pipeline actually builds: PDBFixer at structure.ph 7.0 and pdb2gmx both default every
+# histidine to a neutral tautomer. Changing this changes which variants claim C1 covers.
+_SIDECHAIN_CHARGE = {"D": -1, "E": -1, "K": +1, "R": +1}
+
+
+def audit_columns(variant: str, wt_aa: str, mut_aa: str) -> dict[str, str]:
+    """The three columns the literature audit requires, DERIVED not hand-maintained.
+
+    Kept in one place so the controls and VUS paths cannot disagree, and so a panel
+    rebuild reproduces them instead of dropping them.
+    """
+    dq = _SIDECHAIN_CHARGE.get(mut_aa, 0) - _SIDECHAIN_CHARGE.get(wt_aa, 0)
+    return {
+        "charge_change": "true" if dq else "false",
+        "wells2021": "true" if variant in _WELLS_2021 else "false",
+        # Populated from the Axakova 2025 DMS supplementary; blocks claim C3 until then.
+        "axakova_class": "",
+    }
+
+
+
 
 # Buckets permitted for Route B uncharacterized variants.
 _UNCHARACTERIZED_BUCKETS = {"pathogenic_uncharacterized", "vus"}
@@ -132,6 +168,7 @@ def build_control_rows(controls_csv: str | Path, cfg: dict) -> list[dict]:
                     "measured_state": "apo_monomer",
                     "clinvar_id": (entry.get("clinvar_id") or "").strip(),
                     "oligomer": "monomer",  # pinned; overrides geometry (D4)
+                    **audit_columns(variant, wt, mut),
                 }
             )
     return rows
@@ -187,6 +224,7 @@ def build_uncharacterized_rows(
                     "oligomer": classify_oligomer(
                         pos, str(pdb_path), cutoff, default=default_oligomer
                     ),
+                    **audit_columns(variant, wt, mut),
                 }
             )
     return rows
