@@ -74,6 +74,38 @@ def test_real_window_requires_validation_gate(tmp_path, monkeypatch):
         run_window(cfg, "G93A", "folded", 0, 0, tmp_path / "window.npz")
 
 
+def test_analyze_refuses_to_mix_protocols():
+    """Same engine, different .mdp settings, is still unmixable.
+
+    Provenance catches a mock or another engine. It cannot see sc-coul flipped or nstdhdl
+    changed halfway through a variant -- which is exactly what happens if the SCC is
+    `git pull`ed while an array is in flight.
+    """
+    from src.fep.analyze import _check_single_protocol
+
+    _check_single_protocol("A4V", {"abc123"})            # one protocol: fine
+    with pytest.raises(ValueError, match="different protocols"):
+        _check_single_protocol("A4V", {"abc123", "def456"})
+    with pytest.raises(ValueError, match="different protocols"):
+        _check_single_protocol("A4V", {"abc123", "unlabelled"})
+
+
+def test_forcefield_protonation_names_are_not_wrong_residues():
+    """pdb2gmx writes HID/HIE/HIP, never HIS; the panel speaks in PDB names.
+
+    Without aliasing, every histidine variant in the panel (H43R, H46R, H71Q, H110Y,
+    H120L) dies with a spurious 'refusing to mutate the wrong residue'.
+    """
+    from src.fep.pmx_engine import _canonical_resname
+
+    for ff_name in ("HID", "HIE", "HIP", "HSD", "HSE", "HSP"):
+        assert _canonical_resname(ff_name) == "HIS"
+    assert _canonical_resname("CYX") == "CYS"
+    assert _canonical_resname("ASH") == "ASP"
+    assert _canonical_resname("VAL") == "VAL"      # ordinary names pass through
+    assert _canonical_resname(None) is None
+
+
 def test_window_minimisation_is_lambda_aware():
     """Regression: EM with free-energy OFF minimises at the A state, where the appearing
     atoms are dummies. Real atoms relax on top of them and the window detonates on step 1

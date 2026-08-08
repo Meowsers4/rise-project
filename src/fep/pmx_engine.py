@@ -34,6 +34,7 @@ GROMACS is an OpenMPI build, so ``mdrun`` runs under ``cluster.mdrun_launcher`` 
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import os
 import shutil
 import subprocess
@@ -313,6 +314,22 @@ def _protein_residues(pdb: Path) -> list[tuple[int, str]]:
     return list(seen.items())
 
 
+# pdb2gmx writes FORCE-FIELD residue names, not PDB ones: under amber99sb-star-ildn-mut
+# a histidine is HID/HIE/HIP depending on protonation, never HIS. Comparing those against
+# the panel's one-letter code would reject every HIS variant in the panel (H43R, H46R,
+# H71Q, H110Y, H120L) with a spurious "refusing to mutate the wrong residue".
+_RESNAME_ALIASES = {
+    "HID": "HIS", "HIE": "HIS", "HIP": "HIS", "HSD": "HIS", "HSE": "HIS", "HSP": "HIS",
+    "ASH": "ASP", "GLH": "GLU", "LYN": "LYS",
+    "CYX": "CYS", "CYM": "CYS", "CYS2": "CYS",
+}
+
+
+def _canonical_resname(name: str | None) -> str | None:
+    """Map a force-field protonation/bonding variant back to its PDB residue name."""
+    return _RESNAME_ALIASES.get(name, name) if name else name
+
+
 def mutation_resid(cfg: dict, variant: str, pdb: Path, leg: str) -> int:
     """Residue id pmx must mutate, READ FROM the structure pmx will actually parse.
 
@@ -349,7 +366,7 @@ def mutation_resid(cfg: dict, variant: str, pdb: Path, leg: str) -> int:
     else:
         raise ValueError(f"unknown leg {leg!r}")
 
-    if got != want:
+    if _canonical_resname(got) != want:
         raise ValueError(
             f"{pdb}: residue {resid} is {got!r}, panel says {want!r} "
             f"({record['variant']}). Refusing to mutate the wrong residue."
@@ -537,6 +554,13 @@ def _free_energy_lines(cfg: dict, window: int, nstdhdl: int | None = None) -> li
             f"sc-alpha                 = {fcfg['sc_alpha']}",
             f"sc-power                 = {fcfg['sc_power']}",
             f"sc-sigma                 = {fcfg['sc_sigma']}",
+            # sc-coul defaults to NO. One fep-lambdas vector drives charges and LJ
+            # together, so without this an appearing atom carries a linearly-scaled
+            # partial charge while its LJ core is already softened -- a neighbour can
+            # penetrate the soft core and feel a real charge. Near-singular electrostatics
+            # at intermediate lambda, worst in a packed core. pmx's published protein
+            # protocol sets it; omitting it was a silent deviation.
+            "sc-coul                  = yes",
         ]
     else:
         raise ValueError(f"fep.sc_function={sc!r} -- expected 'beutler' or 'gapsys'")
@@ -705,7 +729,18 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
         _run([*mdrun_argv(cfg, gpu=False), "-deffnm", "em"], cwd=run_dir, dry_run=dry_run,
              env={"OMP_NUM_THREADS": str(cfg["cluster"]["mdrun_ntomp"])})
 
-    _write_mdp(run_dir / "prod.mdp", production_mdp(cfg, window, seed, smoke), dry_run)
+    # Fingerprint the settings, not just the engine. `provenance` catches a mock or a
+    # different engine; it does NOT catch the same engine run with sc-coul flipped or a
+    # different nstdhdl. Mixing those inside one MBAR estimate is silent and wrong, which
+    # is exactly the class of error the provenance rule exists to prevent. The seed is
+    # excluded so replicates of one protocol still agree.
+    mdp_text = production_mdp(cfg, window, seed, smoke)
+    fingerprint = "\n".join(
+        line for line in mdp_text.splitlines()
+        if not line.startswith(("gen-seed", "ld-seed", "init-lambda-state", ";"))
+    )
+    protocol = hashlib.sha256(fingerprint.encode()).hexdigest()[:16]
+    _write_mdp(run_dir / "prod.mdp", mdp_text, dry_run)
 
     _run([gmx, "grompp", "-f", "prod.mdp",
           "-c", str(em_gro if not dry_run else sys_dir / "em.gro"),
@@ -716,14 +751,19 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     # -cpi/-append only make sense once a checkpoint exists; on a fresh run mdrun
     # errors out if they are passed without prod.cpt present.
     resume = ["-cpi", "prod.cpt", "-append"] if (run_dir / "prod.cpt").exists() else []
+    # -cpt is in MINUTES and defaults to 15 -- about as long as a whole folded window, so
+    # without it a killed window has no checkpoint to resume from (CLAUDE.md: assume
+    # windows die). fep.checkpoint_interval_steps is the perses engine's key, not this one.
+    cpt = ["-cpt", str(fcfg["checkpoint_interval_min"])]
     _run([*mdrun_argv(cfg), "-deffnm", "prod",
-          *resume, "-cpo", "prod.cpt",
+          *resume, "-cpo", "prod.cpt", *cpt,
           "-dhdl", "dhdl.xvg"], cwd=run_dir, dry_run=dry_run,
          env={"OMP_NUM_THREADS": str(cfg["cluster"]["mdrun_ntomp"])})
 
     if dry_run:
         return {"lambda_index": window, "n_states": n_states,
-                "u_kn_window": np.zeros((n_states, 0)), "provenance": fcfg["framework"]}
+                "u_kn_window": np.zeros((n_states, 0)), "provenance": fcfg["framework"],
+                "protocol": protocol}
 
     u_kn = dhdl_to_u_kn(run_dir / "dhdl.xvg", float(fcfg["temperature_K"]), n_states)
     dt_ps = float(fcfg["timestep_fs"]) / 1000.0
@@ -745,7 +785,7 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
         )
     _log(f"window done: {variant}/{leg} w{window} r{rep} u_kn{u_kn.shape} finite")
     return {"lambda_index": window, "n_states": n_states, "u_kn_window": u_kn,
-            "provenance": fcfg["framework"]}
+            "provenance": fcfg["framework"], "protocol": protocol}
 
 
 def main() -> None:

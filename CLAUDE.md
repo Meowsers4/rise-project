@@ -143,6 +143,15 @@ window — solvation and ions only care about the physical topology.
 Corollary: a window that merely *survives* is not evidence the protocol is right. The
 high-λ windows that did not crash were started from the same A-state-minimised structure.
 
+## Never `git pull` the SCC while an array is in flight
+Array tasks read the repo code and `config/pipeline.yaml` when EACH TASK STARTS, not at
+submit time. Pulling mid-array gives tasks 1..n one protocol and n+1..108 another, and
+the result is a complete-looking dataset that MBAR will happily combine. Pull only
+between arrays. `run_pmx_window` now hashes the production `.mdp` (minus seed and
+`init-lambda-state`) into each window's NPZ as `protocol`, and
+`analyze._check_single_protocol` refuses to analyse a variant whose windows disagree —
+the settings-level counterpart to the engine-level provenance rule below.
+
 ## Results must carry provenance
 Every window records the engine that produced it; `analyze.py` refuses to mix engines or
 accept an unlabelled window; `validate.py` gates only on `provenance == fep.framework`.

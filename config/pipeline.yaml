@@ -104,7 +104,14 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   nonbonded_method: PME
   nonbonded_cutoff_nm: 1.0
   minimize: true               # energy-minimize each window before equilibration
-  frames_per_window: 150       # samples collected per window = n_samples (3 ns / 20 ps save interval)
+  frames_per_window: 3000      # dH/dl records per window -> nstdhdl = ns_per_window/frames.
+                               # 3000 over 3 ns = one record per 1 ps (nstdhdl 500).
+                               # WAS 150 (one per 20 ps), which kept 151 of the 1.75M
+                               # available evaluations and left MBAR overlap estimates
+                               # badly conditioned. Evaluating dH/dl at all 18 states is
+                               # cheap next to the MD step, so this costs ~nothing in GPU
+                               # time. It also makes nstlog (5000) a clean multiple of
+                               # nstcalcenergy, which it was not at 10000.
   decorrelate: true            # subsample to statistically independent frames (pymbar.timeseries)
                                # before MBAR. Correlated frames make MBAR's error bar look
                                # ~sqrt(g) times smaller than it is; g is the correlation time.
@@ -137,7 +144,15 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   keep_disulfide_reduced: true
   lambda_protocol: default     # unused by the GROMACS path (kept for the perses engine)
   unfolded_reference: tripeptide_native  # ACE-[i-1][i][i+1]-NME, neighbors from the WT structure
-  checkpoint_interval_steps: 50000       # write resumable checkpoint every N production steps (CLAUDE.md)
+  checkpoint_interval_steps: 50000       # READ ONLY by the dead perses engine; GROMACS's
+                                         # -cpt takes MINUTES, not steps. Kept for that
+                                         # engine's sake -- the live value is below.
+  checkpoint_interval_min: 5             # gmx mdrun -cpt. A folded window is ~15 min, and
+                                         # GROMACS's default is 15 min, so most killed
+                                         # windows previously had NO checkpoint and
+                                         # restarted from zero -- contradicting CLAUDE.md.
+                                         # CONFIRM THIS NUMBER: 5 gives ~3 checkpoints per
+                                         # folded window at a few seconds each.
   convergence:
     max_cycle_closure_kcal: 1.0   # flag if fwd/reverse hysteresis exceeds this (kcal/mol)
     check_hysteresis: true

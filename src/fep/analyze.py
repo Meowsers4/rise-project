@@ -39,7 +39,11 @@ def _logmeanexp(a: np.ndarray) -> float:
     return float(m + np.log(np.mean(np.exp(a - m))))
 
 
-_MIN_SAMPLES_TO_DECORRELATE = 10   # below this, timeseries analysis is noise; keep as-is
+_MIN_SAMPLES_TO_DECORRELATE = 10      # below this, timeseries analysis is noise; keep as-is
+
+# Windows written before the .mdp fingerprint existed. Treated as its own protocol so a
+# pre-fingerprint set still analyses alone but can never be silently mixed with a later one.
+_UNLABELLED_PROTOCOL = "unlabelled"
 
 
 def decorrelate_window(u: np.ndarray, lambda_index: int) -> np.ndarray:
@@ -64,7 +68,17 @@ def decorrelate_window(u: np.ndarray, lambda_index: int) -> np.ndarray:
     from pymbar import timeseries
 
     u_self = u[lambda_index]                       # potential of the state actually sampled
-    t0, g, _ = timeseries.detect_equilibration(u_self)
+    # u_self is the TOTAL reduced potential, dominated by ~30k solvent atoms whose
+    # autocorrelation is sub-ps. On its own it reports g ~ 1 at any sane frame spacing --
+    # which looks like "our samples are independent" while saying nothing about the
+    # alchemical coordinate, the slow mode that actually limits this calculation. Take the
+    # neighbour energy difference too (what MBAR consumes) and keep the LARGER g, so the
+    # thinning can only ever be more conservative, never less.
+    nbr = lambda_index + 1 if lambda_index + 1 < u.shape[0] else lambda_index - 1
+    du = u[nbr] - u_self if nbr >= 0 else u_self
+    t0, g_self, _ = timeseries.detect_equilibration(u_self)
+    t0_du, g_du, _ = timeseries.detect_equilibration(du)
+    t0, g = max(t0, t0_du), max(g_self, g_du)
     keep = timeseries.subsample_correlated_data(u_self[t0:], g=g)
     return u[:, t0:][:, keep]
 
@@ -101,17 +115,24 @@ def load_leg_replicate(fep_dir: Path, variant: str, leg: str, rep: int, n_states
 
 
 def collect_provenance(fep_dir: Path, variant: str, legs: list[str], n_reps: int,
-                       n_states: int) -> set[str]:
+                       n_states: int, protocols: set[str] | None = None) -> set[str]:
     """Engine tags across every window of ``variant``, read without loading the samples.
 
     Runs before any MBAR work so a provenance problem is reported immediately rather than
     after minutes of computation on numbers that were never going to be usable.
+
+    Args:
+        protocols: optional set collecting each window's mdp fingerprint. Provenance says
+            *which engine*; the fingerprint says *which settings*. Windows can share an
+            engine and still be unmixable -- e.g. half a variant run before ``sc-coul``
+            was enabled and half after.
 
     Raises:
         ValueError: If any window carries no provenance -- which is what a hand-written
             or pre-provenance file looks like, and is never trustworthy.
     """
     provenances: set[str] = set()
+    protocols = protocols if protocols is not None else set()
     for leg in legs:
         for rep in range(n_reps):
             for w in range(n_states):
@@ -124,6 +145,8 @@ def collect_provenance(fep_dir: Path, variant: str, legs: list[str], n_reps: int
                             "distinguished from a real run; re-run it with src.fep.window."
                         )
                     provenances.add(str(npz["provenance"]))
+                    protocols.add(str(npz["protocol"]) if "protocol" in npz
+                                  else _UNLABELLED_PROTOCOL)
     return provenances
 
 
@@ -176,6 +199,26 @@ def leg_hysteresis_kT(per_window: list[np.ndarray]) -> float:
     return abs(fwd - rev)
 
 
+def _check_single_protocol(variant: str, protocols: set[str]) -> None:
+    """Raise unless every window was produced by the same .mdp settings.
+
+    The engine tag cannot see this: `sc-coul` off vs on, or a changed `nstdhdl`, are the
+    same engine producing incompatible samples. Combining them in one MBAR estimate is
+    silent and wrong. Windows written before fingerprinting count as their own protocol,
+    so a pre-change set still analyses on its own but can never be mixed with a later one.
+
+    Raises:
+        ValueError: If the windows disagree on the mdp fingerprint.
+    """
+    if len(protocols) > 1:
+        raise ValueError(
+            f"{variant}: windows were run under {len(protocols)} different protocols "
+            f"{sorted(protocols)}. A ΔΔG may not mix .mdp settings (sc-coul, nstdhdl, "
+            "sampling length ...) any more than it may mix engines. Re-run the variant "
+            "so every window shares one protocol."
+        )
+
+
 def _check_single_provenance(variant: str, provenances: set[str]) -> None:
     """Raise unless every window seen so far came from the same engine.
 
@@ -202,9 +245,12 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
     max_closure = fcfg["convergence"]["max_cycle_closure_kcal"]
 
     # Establish provenance for the whole variant BEFORE computing anything with it.
-    provenances = collect_provenance(fep_dir, variant, legs, n_reps, n_states)
+    protocols: set[str] = set()
+    provenances = collect_provenance(fep_dir, variant, legs, n_reps, n_states, protocols)
     _check_single_provenance(variant, provenances)
+    _check_single_protocol(variant, protocols)
     provenance = provenances.pop()
+    protocol = protocols.pop() if protocols else _UNLABELLED_PROTOCOL
 
     decorrelate = bool(fcfg.get("decorrelate", True))
     per_rep_ddg, per_rep_stat_var, hysteresis_kcal = [], [], []
@@ -250,6 +296,7 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
         "converged": converged,
         "n_replicates": n_reps,
         "provenance": provenance,
+        "protocol": protocol,
         "decorrelated": decorrelate,
         "n_samples_raw": n_raw_total,
         "n_samples_independent": n_used_total,
@@ -267,6 +314,7 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
     (conv_dir / f"{variant}.json").write_text(json.dumps({
         "variant": variant,
         "provenance": provenance,
+        "protocol": protocol,
         "ddg": ddg,
         "ddg_err": ddg_err,
         "per_replicate_ddg": [float(x) for x in per_rep_ddg],
