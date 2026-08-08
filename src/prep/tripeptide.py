@@ -44,9 +44,39 @@ _CAP_ATOM_RENAMES: dict[str, dict[str, str]] = {
 }
 
 
+# Ideal backbone angles (degrees) for the fallback construction. Only reached when the
+# mutation site is two residues from a chain terminus, i.e. never for the current panel.
+_A_C_N_CA = 121.7       # ACE C -- res0 N -- res0 CA
+_A_CH3_C_N = 116.6      # ACE CH3 -- ACE C -- res0 N
+_A_O_C_N = 122.9        # ACE O -- ACE C -- res0 N
+_A_CA_C_N = 116.2       # resN CA -- resN C -- NME N
+_A_C_N_CH3 = 121.7      # resN C -- NME N -- NME CH3
+_OMEGA_TRANS = 180.0    # trans peptide bond
+
+
 def _unitvec(v: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(v)
     return v / n if n else v
+
+
+def _place_atom(a: np.ndarray, b: np.ndarray, c: np.ndarray,
+                bond: float, angle_deg: float, dihedral_deg: float) -> np.ndarray:
+    """Position a fourth atom D from internal coordinates against A-B-C (NeRF).
+
+    ``bond`` is |C-D| (nm), ``angle_deg`` is B-C-D, ``dihedral_deg`` is A-B-C-D. Built in
+    the local frame of A-B-C, so the result rotates with the input rather than depending
+    on a lab axis -- the defect this replaced placed cap atoms along a fixed [0,0,1].
+    """
+    ang, dih = np.radians(angle_deg), np.radians(dihedral_deg)
+    bc = _unitvec(c - b)
+    n = _unitvec(np.cross(b - a, bc))
+    local = np.array([
+        -bond * np.cos(ang),
+        bond * np.sin(ang) * np.cos(dih),
+        bond * np.sin(ang) * np.sin(dih),
+    ])
+    basis = np.array([bc, np.cross(n, bc), n]).T
+    return c + basis @ local
 
 
 def build_capped_tripeptide(wt_pdb: str | Path, center: int, chain_id: str | None,
@@ -87,6 +117,21 @@ def build_capped_tripeptide(wt_pdb: str | Path, center: int, chain_id: str | Non
                         "a tripeptide with both native neighbours."
                     )
                 trio = residues[i - 1:i + 2]
+                # The cap heavy atoms ARE backbone atoms of the residues flanking the
+                # trio, when those exist. Carrying them lets us copy native coordinates
+                # instead of constructing a guess -- see _ace_cap_coords.
+                flank_prev = residues[i - 2] if i - 2 >= 0 else None
+                flank_next = residues[i + 2] if i + 2 < len(residues) else None
+                # Guard the neighbours we slice: `residues` is list-adjacent after
+                # filtering, not necessarily sequence-adjacent. Across a chain gap the
+                # "neighbour" is a non-native residue with no bond to the trio.
+                ids = [int(r.id) for r in trio]
+                if ids != [center - 1, center, center + 1]:
+                    raise ValueError(
+                        f"residues flanking {center} in {wt_pdb} are numbered {ids}, not "
+                        f"{[center - 1, center, center + 1]} -- there is a chain break, so "
+                        "these are not the native neighbours the unfolded reference needs."
+                    )
                 break
         if trio:
             break
@@ -104,18 +149,32 @@ def build_capped_tripeptide(wt_pdb: str | Path, center: int, chain_id: str | Non
     def named(res, name):
         return next(a for a in res.atoms() if a.name == name)
 
-    # --- cap heavy-atom geometry from the trio's terminal backbone atoms ---
+    # --- cap heavy-atom geometry ---------------------------------------------------
+    # An ACE cap is chemically the preceding residue's CA-C(=O); an NME cap is the
+    # following residue's N-CA. When those residues are present in the parent structure
+    # -- which they are for every panel variant except one two residues from a terminus
+    # -- copy their coordinates. That is exact native geometry and, unlike a constructed
+    # guess, is invariant under rigid-body rotation of the input PDB.
     n0, ca0 = coord(named(trio[0], "N")), coord(named(trio[0], "CA"))
-    d1 = _unitvec(n0 - ca0)
-    c_ace = n0 + _D_PEPTIDE_CN * d1
-    ch3_ace = c_ace + _D_C_CH3 * d1
-    perp = _unitvec(np.cross(d1, np.array([0.0, 0.0, 1.0])))
-    o_ace = c_ace + _D_C_O * perp
-
     cL, caL = coord(named(trio[-1], "C")), coord(named(trio[-1], "CA"))
-    d2 = _unitvec(cL - caL)
-    n_nme = cL + _D_PEPTIDE_CN * d2
-    ch3_nme = n_nme + _D_N_CH3 * d2
+
+    if flank_prev is not None:
+        ch3_ace = coord(named(flank_prev, "CA"))
+        c_ace = coord(named(flank_prev, "C"))
+        o_ace = coord(named(flank_prev, "O"))
+    else:
+        c0 = coord(named(trio[0], "C"))
+        c_ace = _place_atom(c0, ca0, n0, _D_PEPTIDE_CN, _A_C_N_CA, _OMEGA_TRANS)
+        ch3_ace = _place_atom(ca0, n0, c_ace, _D_C_CH3, _A_CH3_C_N, _OMEGA_TRANS)
+        o_ace = _place_atom(ca0, n0, c_ace, _D_C_O, _A_O_C_N, 0.0)
+
+    if flank_next is not None:
+        n_nme = coord(named(flank_next, "N"))
+        ch3_nme = coord(named(flank_next, "CA"))
+    else:
+        nL = coord(named(trio[-1], "N"))
+        n_nme = _place_atom(nL, caL, cL, _D_PEPTIDE_CN, _A_CA_C_N, _OMEGA_TRANS)
+        ch3_nme = _place_atom(caL, cL, n_nme, _D_N_CH3, _A_C_N_CH3, _OMEGA_TRANS)
 
     # --- assemble ACE -> trio -> NME in physical order ---
     new = Topology()

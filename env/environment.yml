@@ -28,6 +28,7 @@ dependencies:
   - pyyaml
   # --- dev / test ---
   - pytest
+  - snakemake        # CLAUDE.md Verification mandates `snakemake -n` after any rule change
   - pip
   - pip:
       # pmx is not on conda-forge. NOTE THE BRANCH: deGrootLab/pmx `master` is the legacy
@@ -36,5 +37,7 @@ dependencies:
       # Pin a known-good revision: older 2.0 snapshots mis-parse pdb2gmx output
       # with non-blank chain IDs.
       - pmx @ git+https://github.com/deGrootLab/pmx.git@0dd5f0a9cdf26109eff98bdfeb4ac4e55353aa76
-# NOTE: snakemake is deliberately absent -- Stage 3 dispatches via SGE qsub arrays
-# (scripts/submit_array.sh). Install it separately on a login node if you want the DAG.
+# NOTE: Stage 3 dispatches via SGE qsub arrays (scripts/submit_array.sh), NOT via
+# snakemake -- the DAG is not the execution path on the cluster. snakemake is included
+# anyway because CLAUDE.md's Verification section mandates `snakemake -n` after any rule
+# change, and that check cannot run in an env that lacks it.

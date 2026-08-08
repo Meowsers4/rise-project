@@ -119,3 +119,93 @@ def test_terminus_center_raises():
     first = _first_protein_resid(STRUCTURE_3ECU)
     with pytest.raises(ValueError, match="terminus"):
         build_capped_tripeptide(STRUCTURE_3ECU, center=first, chain_id="A", ph=7.0)
+
+
+def _angle_deg(p, q, r):
+    v1, v2 = p - q, r - q
+    return float(np.degrees(np.arccos(np.clip(
+        np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)), -1.0, 1.0))))
+
+
+def test_place_atom_reproduces_requested_internal_coordinates():
+    """The NeRF fallback must build the geometry it is asked for, in the LOCAL frame.
+
+    The construction it replaced put ACE's CH3, C and the residue's N and CA on one
+    straight line (all angles 180 deg) and placed the carbonyl O along a fixed lab axis.
+    """
+    from src.prep.tripeptide import _place_atom
+
+    a = np.array([0.0, 0.0, 0.0])
+    b = np.array([0.15, 0.0, 0.0])
+    c = np.array([0.22, 0.12, 0.0])
+    d = _place_atom(a, b, c, 0.133, 121.7, 180.0)
+    assert np.linalg.norm(d - c) == pytest.approx(0.133, abs=1e-6)
+    assert _angle_deg(b, c, d) == pytest.approx(121.7, abs=1e-3)
+
+    # equivariant under rotation of the reference frame -- no lab-axis dependence
+    th = 0.7
+    rot = np.array([[np.cos(th), -np.sin(th), 0.0],
+                    [np.sin(th), np.cos(th), 0.0],
+                    [0.0, 0.0, 1.0]])
+    d_rot = _place_atom(a @ rot.T, b @ rot.T, c @ rot.T, 0.133, 121.7, 180.0)
+    assert np.allclose(d_rot, d @ rot.T, atol=1e-9)
+
+
+@pytest.mark.skipif(not (HAVE_OMM and STRUCTURE_3ECU.exists()),
+                    reason="needs OpenMM/PDBFixer and 3ECU")
+@pytest.mark.parametrize("center", [4, 93, 113])
+def test_ace_cap_geometry_is_physical(center):
+    """Cap heavy atoms must form a real peptide unit, not a collinear stub.
+
+    ACE is chemically the preceding residue's CA-C(=O), so when that residue exists we
+    copy its native coordinates. Previously every one of these angles was 180 degrees.
+    """
+    from openmm import unit
+
+    top, positions = build_capped_tripeptide(str(STRUCTURE_3ECU), center, "A", 7.0)
+    pos = np.array(positions.value_in_unit(unit.nanometer))
+    at = {(a.residue.index, a.name): a.index for a in top.atoms()}
+    residues = sorted({(a.residue.index, a.residue.name) for a in top.atoms()})
+    ace, first = residues[0][0], residues[1][0]
+
+    ch3, c, o = (pos[at[(ace, n)]] for n in ("CH3", "C", "O"))
+    n_first, ca_first = pos[at[(first, "N")]], pos[at[(first, "CA")]]
+
+    assert np.linalg.norm(c - n_first) == pytest.approx(0.133, abs=0.015)
+    assert 105.0 < _angle_deg(ch3, c, n_first) < 130.0     # ideal ~116.6, was 180
+    assert 105.0 < _angle_deg(c, n_first, ca_first) < 135.0  # ideal ~121.7, was 180
+    assert 110.0 < _angle_deg(o, c, n_first) < 135.0       # ideal ~122.9, was arbitrary
+
+
+@pytest.mark.skipif(not (HAVE_OMM and STRUCTURE_3ECU.exists()),
+                    reason="needs OpenMM/PDBFixer and 3ECU")
+def test_tripeptide_is_invariant_under_rotation_of_the_input(tmp_path):
+    """The same protein in a different lab orientation must give the same molecule.
+
+    The old cap construction referenced a fixed [0,0,1], so the carbonyl O moved relative
+    to the peptide when the input PDB was rotated -- the unfolded leg was not reproducible.
+    """
+    from openmm import unit
+    from openmm.app import PDBFile
+
+    src = PDBFile(str(STRUCTURE_3ECU))
+    pos = np.array(src.getPositions(asNumpy=True).value_in_unit(unit.nanometer))
+    th = 0.9
+    rot = np.array([[np.cos(th), -np.sin(th), 0.0],
+                    [np.sin(th), np.cos(th), 0.0],
+                    [0.0, 0.0, 1.0]])
+    rotated = tmp_path / "rotated.pdb"
+    with open(rotated, "w") as fh:
+        PDBFile.writeFile(src.topology, unit.Quantity(pos @ rot.T, unit.nanometer), fh)
+
+    def cap_angles(path):
+        top, p = build_capped_tripeptide(str(path), 93, "A", 7.0)
+        q = np.array(p.value_in_unit(unit.nanometer))
+        at = {(a.residue.index, a.name): a.index for a in top.atoms()}
+        res = sorted({(a.residue.index, a.residue.name) for a in top.atoms()})
+        ace, first = res[0][0], res[1][0]
+        return (_angle_deg(q[at[(ace, "CH3")]], q[at[(ace, "C")]], q[at[(first, "N")]]),
+                _angle_deg(q[at[(ace, "O")]], q[at[(ace, "C")]], q[at[(first, "N")]]))
+
+    for a, b in zip(cap_angles(STRUCTURE_3ECU), cap_angles(rotated)):
+        assert a == pytest.approx(b, abs=0.5)

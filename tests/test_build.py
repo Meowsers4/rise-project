@@ -150,3 +150,26 @@ def test_committed_panel_is_reproducible_from_its_sources():
         build_panel(cfg, out)
         assert out.read_text() == (ROOT / "data" / "variants.csv").read_text(), \
             "data/variants.csv is stale relative to its build inputs"
+
+
+def test_gate_subset_rejects_charge_changing_variants():
+    """CLAUDE.md rule 2, enforced in code instead of by a comment.
+
+    Net-charge PME artifacts do not cancel between the folded and unfolded legs and the
+    pmx engine has no counterion co-alchemy, so a charge-changing variant in the gate
+    would be judged on an uncancelled few-kcal/mol error.
+    """
+    from src.panel.build import _validate_gate_subset
+
+    rows = [
+        {"variant": "A4V", "charge_change": "false"},
+        {"variant": "H43R", "charge_change": "true"},
+    ]
+    controls = {"A4V", "H43R"}
+
+    ok = {"validation": {"gate_subset": ["A4V"]}}
+    _validate_gate_subset(controls, ok, rows)          # neutral only: fine
+
+    bad = {"validation": {"gate_subset": ["A4V", "H43R"]}}
+    with pytest.raises(ValueError, match="charge-CHANGING"):
+        _validate_gate_subset(controls, bad, rows)

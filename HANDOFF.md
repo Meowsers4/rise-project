@@ -90,9 +90,15 @@ post-fix windows. All gate variants must share one protocol.
 - at 2 concurrent GPUs, 11 variants × 5 replicates ≈ 275 GPU-h ≈ 5.7 days.
   Check `qquota -u bodeb` first — concurrency dominates every scope decision
 
-### 3b. Found by the 2026-08-08 review, still open
+### 3b. Found by the 2026-08-08 review
 
-Ranked. Fixed items are in the changelog below, not here.
+**Fixed** (commits `ad7374c`, `<this one>`): the panel-rebuild data loss, the `scc_env.sh`
+`set -e` trap, the unset-`SGE_TASK_ID` guard, the fail-open protocol out-parameter, the
+untestable fingerprint, the collinear ACE/NME caps (items 6), GROMACS-side disulfide
+verification (4), fingerprint-survives-resume (5), charge-neutrality enforcement (9), and
+`snakemake` in the env (12).
+
+**Still open**, ranked:
 
 1. **`rule validate` rewrites the file it declares as an input.** `validate.py:main()`
    rewrites `results/validation_gate.json` even without `--gate-only`, while the Snakefile

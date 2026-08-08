@@ -364,3 +364,56 @@ def test_pre_registered_thresholds_are_not_quietly_lowered():
     # hysteresis bound is tighter than the per-variant cap it complements.
     assert v["pivot_pearson"] < v["min_pearson"]
     assert v["max_median_cycle_closure_kcal"] <= f["convergence"]["max_cycle_closure_kcal"]
+
+
+def test_disulfide_guard_catches_a_rebuilt_bond(tmp_path):
+    """CLAUDE.md: the GROMACS path needs its OWN disulfide guard.
+
+    Until now it piped "n" into pdb2gmx -ss open-loop and never checked. A re-formed
+    Cys57-Cys146 bond still yields a finite, plausible ddG, so nothing downstream notices.
+    """
+    from src.fep.pmx_engine import assert_topology_disulfide_free
+
+    def gro(lines):
+        p = tmp_path / f"c{len(list(tmp_path.iterdir()))}.gro"
+        p.write_text("t\n%d\n" % len(lines) + "\n".join(lines) + "\n 3 3 3\n")
+        return p
+
+    reduced = gro(["   57CYS     SG   1   1.000   1.000   1.000",
+                   "   57CYS     HG   2   1.100   1.000   1.000",
+                   "  146CYS     SG   3   2.000   2.000   2.000",
+                   "  146CYS     HG   4   2.100   2.000   2.000"])
+    clean_top = tmp_path / "ok.top"
+    clean_top.write_text("[ moleculetype ]\nProtein 3\n; CYS 57\n")
+    assert_topology_disulfide_free(clean_top, reduced)      # must not raise
+
+    # 1. bridged cysteines lose HG
+    bridged = gro(["   57CYS     SG   1   1.000   1.000   1.000",
+                   "  146CYS     SG   2   1.200   1.000   1.000",
+                   "  146CYS     HG   3   1.300   1.000   1.000"])
+    with pytest.raises(ValueError, match="no HG"):
+        assert_topology_disulfide_free(clean_top, bridged)
+
+    # 2. force field renamed the residue instead
+    cyx_top = tmp_path / "cyx.top"
+    cyx_top.write_text("[ atoms ]\n  1  N  57  CYS2  N  1\n")
+    with pytest.raises(ValueError, match="re-formed a disulfide"):
+        assert_topology_disulfide_free(cyx_top, reduced)
+
+
+def test_disulfide_prompt_count_covers_all_cysteine_pairs():
+    """pdb2gmx asks once per candidate PAIR, not per cysteine.
+
+    SOD1 has 4 cysteines -> up to 6 prompts. Supplying only 4 answers let pdb2gmx take
+    its default (form the bond) on the remainder -- the exact invariant being defended.
+    """
+    from src.fep.pmx_engine import _count_cys_pairs
+
+    pdb = Path(__file__).parent / "fixtures" / "_cys4.pdb"
+    pdb.write_text("".join(
+        f"ATOM  {i:5d}  SG  CYS A{i:4d}       0.000   0.000   0.000  1.00  0.00           S\n"
+        for i in (6, 57, 111, 146)))
+    try:
+        assert _count_cys_pairs(pdb) == 6      # 4*3/2, not 4
+    finally:
+        pdb.unlink(missing_ok=True)

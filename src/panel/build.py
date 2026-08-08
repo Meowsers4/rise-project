@@ -243,14 +243,32 @@ def ingest_external_variants(cfg: dict) -> Path:
     )
 
 
-def _validate_gate_subset(control_variants: set[str], cfg: dict) -> None:
-    """Every M3 gate-subset variant must be a control, or the gate is undefined."""
+def _validate_gate_subset(control_variants: set[str], cfg: dict,
+                          rows: list[dict] | None = None) -> None:
+    """Every M3 gate-subset variant must be a charge-neutral control.
+
+    CLAUDE.md rule 2 makes charge-neutrality non-negotiable: a net-charge change carries a
+    PME finite-size artifact that does not cancel between the folded and unfolded legs
+    (different box sizes), and the pmx engine has no counterion co-alchemy. Until now that
+    was guaranteed only by the hand-curated list in config and a comment above it, so
+    adding H43R to lift `n` would have passed every check.
+    """
     subset = cfg.get("validation", {}).get("gate_subset") or []
     missing = [v for v in subset if v not in control_variants]
     if missing:
         raise ValueError(
             f"validation.gate_subset variants not in controls: {missing}"
         )
+    if rows is not None:
+        charged = sorted(r["variant"] for r in rows
+                         if r["variant"] in subset and r.get("charge_change") == "true")
+        if charged:
+            raise ValueError(
+                f"validation.gate_subset contains charge-CHANGING variants {charged}. "
+                "The gate is charge-neutral only (CLAUDE.md rule 2): net-charge PME "
+                "artifacts do not cancel between legs and the engine has no counterion "
+                "co-alchemy. These belong in the C1 sub-gate, not this one."
+            )
 
 
 def build_panel(cfg: dict, out_path: str | Path) -> list[dict]:
@@ -265,7 +283,7 @@ def build_panel(cfg: dict, out_path: str | Path) -> list[dict]:
     controls_csv = ROOT / cfg["panel"]["controls_csv"]
     rows = build_control_rows(controls_csv, cfg)
     control_variants = {r["variant"] for r in rows}
-    _validate_gate_subset(control_variants, cfg)
+    _validate_gate_subset(control_variants, cfg, rows)
 
     uncharacterized_csv = ROOT / cfg["panel"]["uncharacterized_csv"]
     if uncharacterized_csv.exists():

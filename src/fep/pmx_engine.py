@@ -292,9 +292,63 @@ def _pdb2gmx_stdin(cfg: dict, n_cysteines: int) -> str:
 
 
 def _count_cys_pairs(pdb: Path) -> int:
-    """Upper bound on pdb2gmx disulfide prompts: number of SG atoms."""
-    return sum(1 for line in pdb.read_text().splitlines()
+    """Answers to supply to pdb2gmx's ``-ss`` prompts.
+
+    pdb2gmx asks once per candidate cysteine PAIR, so n cysteines can produce up to
+    n(n-1)/2 prompts -- NOT n. SOD1 has 4 cysteines, hence up to 6. Supplying too few
+    answers lets pdb2gmx fall back to its default (form the bond) on the remainder, which
+    is exactly the invariant we are defending, so answer the worst case. Extra lines on
+    stdin are harmless.
+    """
+    n_sg = sum(1 for line in pdb.read_text().splitlines()
                if line.startswith(("ATOM", "HETATM")) and line[12:16].strip() == "SG")
+    return max(n_sg, n_sg * (n_sg - 1) // 2)
+
+
+def assert_topology_disulfide_free(top: Path, gro: Path) -> None:
+    """Fail unless pdb2gmx left every cysteine as a free thiol.
+
+    CLAUDE.md: "the GROMACS path needs its OWN guard". Until now the guard was piping
+    "n" into ``-ss`` open-loop and hoping -- no confirmation. pdb2gmx re-detects disulfides
+    by SG-SG distance, and if one were re-formed the ΔΔG would still come out finite and
+    plausible, so nothing downstream would ever notice. Stage 1 asserts on the OpenMM
+    topology; this is the same assertion on what GROMACS actually built.
+
+    Raises:
+        ValueError: If the topology declares a CYS2/CYX residue, or if any cysteine in
+            the coordinate file lacks its HG hydrogen.
+    """
+    text = top.read_text()
+    oxidised = [name for name in ("CYS2", "CYX") if f" {name} " in text or f"\n{name}\n" in text]
+    if oxidised:
+        raise ValueError(
+            f"{top}: topology contains {oxidised} -- pdb2gmx re-formed a disulfide despite "
+            "the '-ss' answers. v1 is the REDUCED form (fep.keep_disulfide_reduced)."
+        )
+    # Every CYS must carry HG. A bridged cysteine loses it, so this catches the case even
+    # when the force field keeps the residue named CYS.
+    have_sg: set[int] = set()
+    have_hg: set[int] = set()
+    for line in gro.read_text().splitlines():
+        if len(line) < 20:
+            continue
+        resname, atom = line[5:10].strip(), line[10:15].strip()
+        if not resname.startswith("CYS"):
+            continue
+        try:
+            resid = int(line[0:5])
+        except ValueError:
+            continue
+        if atom == "SG":
+            have_sg.add(resid)
+        elif atom == "HG":
+            have_hg.add(resid)
+    missing = sorted(have_sg - have_hg)
+    if missing:
+        raise ValueError(
+            f"{gro}: cysteine residues {missing} have SG but no HG -- they are bridged, "
+            "not reduced. v1 simulates the disulfide-reduced form."
+        )
 
 
 _CAPS = frozenset({"ACE", "NME", "NAC", "NH2"})
@@ -471,6 +525,13 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
         _run([*pmx_argv(cfg, "gentop"),
               "-p", "topol.top", "-o", "hybrid.top", "-ff", ff],
              cwd=sys_dir, dry_run=dry_run)
+
+        # Confirm the -ss answers actually took. Checked HERE, on the topology that every
+        # window will use, rather than trusting the piped "n"s (CLAUDE.md: the GROMACS
+        # path needs its own guard). Solvation only adds water, so this is the last point
+        # at which the protein's bonding is decided.
+        if not dry_run and fcfg.get("keep_disulfide_reduced", True):
+            assert_topology_disulfide_free(sys_dir / "hybrid.top", sys_dir / "conf.gro")
 
         # 4. box, solvent, neutralising ions at the configured ionic strength.
         _run([gmx, "editconf", "-f", "conf.gro", "-o", "box.gro", "-bt", "cubic",
@@ -758,6 +819,22 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     # excluded so replicates of one protocol still agree.
     mdp_text = production_mdp(cfg, window, seed, smoke)
     protocol = protocol_fingerprint(mdp_text)
+
+    # The fingerprint is computed from the CURRENT config, but a resumed window appends to
+    # a dhdl.xvg written under whatever config was live when it started. Killed under one
+    # protocol, resumed under another, and the file silently contains both while claiming
+    # the new hash. Pin it on first write and refuse a mismatched resume.
+    stamp = run_dir / "protocol.sha"
+    if not dry_run:
+        if stamp.exists() and stamp.read_text().strip() != protocol:
+            raise ToolError(
+                f"{run_dir}: this window's samples were produced under protocol "
+                f"{stamp.read_text().strip()}, but the current config gives {protocol}. "
+                "Resuming would append incompatible samples to dhdl.xvg. Delete the run "
+                "directory to restart this window under the new protocol."
+            )
+        stamp.write_text(protocol + "\n")
+
     _write_mdp(run_dir / "prod.mdp", mdp_text, dry_run)
 
     _run([gmx, "grompp", "-f", "prod.mdp",
