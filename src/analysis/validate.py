@@ -240,13 +240,53 @@ def run_gate_validation(cfg: dict, out_gate_report: str | Path,
     return gate
 
 
+def read_gate_verdict(gate_report: str | Path) -> dict:
+    """Load the recorded gate verdict. The gate is evaluated ONCE, by run_gate_validation.
+
+    Classification consumes that record rather than re-deriving it. Two reasons:
+
+    * **Pre-registration.** The thresholds were fixed before any gate evaluation so the
+      verdict is a one-time, on-the-record go/no-go. Recomputing it on every downstream
+      invocation would let it change silently as data lands.
+    * **The DAG.** ``rule validate`` declares the report as an input; if this function
+      also wrote it, the output would be permanently older than its own input, Snakemake
+      would re-run ``validate`` forever, and through ``gate_dependency`` that invalidates
+      every non-gate FEP window job.
+
+    Raises:
+        SystemExit: If the report is missing, unreadable, or records a no-go.
+    """
+    gate_report = Path(gate_report)
+    try:
+        gate = json.loads(gate_report.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        raise SystemExit(
+            f"no usable validation gate report at {gate_report} ({exc}). Run "
+            "`python -m src.analysis.validate --gate-only --out <report>` first; "
+            "classification may not proceed on an unevaluated gate."
+        ) from exc
+    if gate.get("passed") is not True:
+        raise SystemExit(
+            f"VALIDATION GATE FAILED ({gate.get('reason')}; pearson={gate.get('pearson')}, "
+            f"rmse={gate.get('rmse')}, n={gate.get('n')}). Refusing to classify "
+            f"uncharacterized variants. See {gate_report}."
+        )
+    return gate
+
+
 def run_validation(cfg: dict, out_ddg_map: str | Path, out_gate_report: str | Path,
                    fep_dir: str | Path | None = None,
-                   variants_csv: str | Path | None = None) -> dict:
-    """Run the gate; write the report always and the ddG map only if the gate passes.
+                   variants_csv: str | Path | None = None,
+                   reuse_gate: bool = True) -> dict:
+    """Classify uncharacterized variants, gated on the RECORDED control verdict.
 
-    Returns the gate report dict. Raises SystemExit on no-go so the Snakemake rule
-    fails and the pipeline stops before trusting uncharacterized variants.
+    Args:
+        reuse_gate: read the existing gate report (the default, and what the DAG uses)
+            rather than re-evaluating the gate here. ``False`` restores the old
+            evaluate-and-write behaviour for direct/standalone use and for tests.
+
+    Returns the gate report dict. Raises SystemExit on no-go so the Snakemake rule fails
+    and the pipeline stops before trusting uncharacterized variants.
     """
     variants_csv = variants_csv or ROOT / cfg["panel"]["csv"]
     fep_dir = fep_dir or ROOT / "results" / "fep"
@@ -256,11 +296,13 @@ def run_validation(cfg: dict, out_ddg_map: str | Path, out_gate_report: str | Pa
            for r in panel if r["bucket"] == "positive_control" and r["exp_ddg"]}
     fep = load_fep_results(fep_dir, variants)
 
-    gate = evaluate_gate(fep, exp, cfg)
-
-    out_gate_report = Path(out_gate_report)
-    out_gate_report.parent.mkdir(parents=True, exist_ok=True)
-    out_gate_report.write_text(json.dumps(gate, indent=2))
+    if reuse_gate:
+        gate = read_gate_verdict(out_gate_report)     # reads; never writes
+    else:
+        gate = evaluate_gate(fep, exp, cfg)
+        out_gate_report = Path(out_gate_report)
+        out_gate_report.parent.mkdir(parents=True, exist_ok=True)
+        out_gate_report.write_text(json.dumps(gate, indent=2))
 
     if not gate["passed"]:
         raise SystemExit(

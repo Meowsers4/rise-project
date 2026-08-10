@@ -192,7 +192,10 @@ def test_run_validation_passes_and_writes_map(tmp_path):
                          {"A": 1.1, "B": 2.1, "C": 4.1, "D": 7.1, "X1Y": _fep_val()}.items()})
     ddg_map = tmp_path / "ddg_map.csv"
     report = tmp_path / "gate.json"
-    gate = run_validation(CFG, ddg_map, report, fep_dir=fep_dir, variants_csv=panel)
+    # reuse_gate=False: the standalone evaluate-and-write path. The DAG uses the default
+    # (read the recorded verdict) so that `rule validate` never writes its own input.
+    gate = run_validation(CFG, ddg_map, report, fep_dir=fep_dir, variants_csv=panel,
+                          reuse_gate=False)
     assert gate["passed"]
     assert report.exists() and ddg_map.exists()
     rows = list(csv.DictReader(open(ddg_map)))
@@ -213,7 +216,8 @@ def test_run_validation_fails_refuses_map(tmp_path):
     ddg_map = tmp_path / "ddg_map.csv"
     report = tmp_path / "gate.json"
     with pytest.raises(SystemExit):
-        run_validation(CFG, ddg_map, report, fep_dir=fep_dir, variants_csv=panel)
+        run_validation(CFG, ddg_map, report, fep_dir=fep_dir, variants_csv=panel,
+                       reuse_gate=False)
     assert report.exists()          # report always written
     assert not ddg_map.exists()     # map refused on no-go
 
@@ -228,3 +232,51 @@ def test_gate_validation_does_not_require_non_gate_fep(tmp_path):
     gate = run_gate_validation(CFG, report, fep_dir=fep_dir, variants_csv=panel)
     assert gate["passed"]
     assert report.exists()
+
+
+def test_run_validation_reads_the_recorded_verdict_and_never_writes_it(tmp_path):
+    """`rule validate` declares the gate report as an INPUT.
+
+    If classification also wrote it, the output would be permanently older than its own
+    input: Snakemake re-runs `validate` forever and, through `gate_dependency`,
+    invalidates every non-gate FEP window job. The verdict is also pre-registered -- it is
+    evaluated once and then read, not re-derived on each downstream call.
+    """
+    panel = tmp_path / "variants.csv"
+    _write_panel(panel)
+    fep_dir = tmp_path / "fep"
+    _write_fep(fep_dir, {v: _fep(dg) for v, dg in
+                         {"A": 1.1, "B": 2.1, "C": 4.1, "D": 7.1, "X1Y": 0.2}.items()})
+    report = tmp_path / "gate.json"
+    ddg_map = tmp_path / "ddg_map.csv"
+
+    # the gate is evaluated once, on its own
+    run_gate_validation(CFG, report, fep_dir=fep_dir, variants_csv=panel)
+    before = report.read_bytes(), report.stat().st_mtime_ns
+
+    gate = run_validation(CFG, ddg_map, report, fep_dir=fep_dir, variants_csv=panel)
+    assert gate["passed"] and ddg_map.exists()
+    assert (report.read_bytes(), report.stat().st_mtime_ns) == before, \
+        "classification rewrote the gate report it declares as an input"
+
+
+def test_classification_refuses_an_unevaluated_or_failed_gate(tmp_path):
+    """No recorded verdict, or a recorded no-go, must stop classification."""
+    panel = tmp_path / "variants.csv"
+    _write_panel(panel)
+    fep_dir = tmp_path / "fep"
+    _write_fep(fep_dir, {v: _fep(dg) for v, dg in
+                         {"A": 1.1, "B": 2.1, "C": 4.1, "D": 7.1, "X1Y": 0.2}.items()})
+    ddg_map = tmp_path / "ddg_map.csv"
+
+    missing = tmp_path / "never-run.json"
+    with pytest.raises(SystemExit, match="no usable validation gate report"):
+        run_validation(CFG, ddg_map, missing, fep_dir=fep_dir, variants_csv=panel)
+    assert not ddg_map.exists()
+
+    failed = tmp_path / "failed.json"
+    failed.write_text(json.dumps({"passed": False, "reason": "pearson", "pearson": 0.2,
+                                  "rmse": 3.0, "n": 4}))
+    with pytest.raises(SystemExit, match="VALIDATION GATE FAILED"):
+        run_validation(CFG, ddg_map, failed, fep_dir=fep_dir, variants_csv=panel)
+    assert not ddg_map.exists()
