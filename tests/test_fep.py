@@ -417,3 +417,58 @@ def test_disulfide_prompt_count_covers_all_cysteine_pairs():
         assert _count_cys_pairs(pdb) == 6      # 4*3/2, not 4
     finally:
         pdb.unlink(missing_ok=True)
+
+
+def test_mdrun_retries_a_busy_gpu_but_not_a_blown_up_system(monkeypatch, tmp_path):
+    """CUDA #46 is transient contention; a LINCS explosion is not.
+
+    Submitting the G93A and I113T arrays in the same instant on 2026-08-09 put their
+    first tasks on the same device and lost 4 windows to "CUDA-capable device(s) is/are
+    busy". Retrying that is right. Retrying a genuinely broken system would turn a loud
+    failure into a slow one, so the match is deliberately narrow.
+    """
+    from src.fep import pmx_engine
+
+    cfg = {"cluster": {"gpu_retry_attempts": 3, "gpu_retry_delay_s": 0}}
+    monkeypatch.setattr(pmx_engine.time, "sleep", lambda _s: None)
+
+    calls = []
+    gpu_busy = ("Error while switching to device #0. CUDA error #46 "
+                "(cudaErrorDevicesUnavailable): CUDA-capable device(s) is/are busy")
+
+    def flaky(cmd, cwd, stdin=None, dry_run=False, env=None):
+        calls.append(cmd)
+        if len(calls) < 3:
+            raise pmx_engine.ToolError(gpu_busy)
+        return "ok"
+
+    monkeypatch.setattr(pmx_engine, "_run", flaky)
+    out = pmx_engine._run_mdrun_with_gpu_retry(
+        ["gmx", "mdrun"], cwd=tmp_path, cfg=cfg, resume_argv=["-cpi", "prod.cpt"])
+    assert out == "ok" and len(calls) == 3
+
+    # a real failure must surface on the first attempt, not be retried
+    calls.clear()
+
+    def exploded(cmd, cwd, stdin=None, dry_run=False, env=None):
+        calls.append(cmd)
+        raise pmx_engine.ToolError("Fatal error:\nLINCS: bond length 9572052.0000")
+
+    monkeypatch.setattr(pmx_engine, "_run", exploded)
+    with pytest.raises(pmx_engine.ToolError, match="LINCS"):
+        pmx_engine._run_mdrun_with_gpu_retry(
+            ["gmx", "mdrun"], cwd=tmp_path, cfg=cfg, resume_argv=[])
+    assert len(calls) == 1
+
+    # and it gives up rather than retrying forever
+    calls.clear()
+
+    def always_busy(cmd, cwd, stdin=None, dry_run=False, env=None):
+        calls.append(cmd)
+        raise pmx_engine.ToolError(gpu_busy)
+
+    monkeypatch.setattr(pmx_engine, "_run", always_busy)
+    with pytest.raises(pmx_engine.ToolError, match="CUDA error #46"):
+        pmx_engine._run_mdrun_with_gpu_retry(
+            ["gmx", "mdrun"], cwd=tmp_path, cfg=cfg, resume_argv=[])
+    assert len(calls) == 3

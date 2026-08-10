@@ -778,6 +778,43 @@ def dhdl_to_u_kn(xvg: Path, temperature_K: float, n_states: int) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 # One window                                                                   #
 # --------------------------------------------------------------------------- #
+# mdrun's own words when the scheduler hands out a device another process already holds.
+# Transient: two array tasks launching in the same instant collide, the second dies, and
+# the window is lost for the rest of the array. Seen 2026-08-09 when G93A and I113T were
+# submitted simultaneously -- their tasks 1/2/55 all died this way while the other 106
+# windows of each ran clean.
+_GPU_BUSY_SIGNATURES = (
+    "cudaErrorDevicesUnavailable",
+    "CUDA error #46",
+    "no GPU is detected",
+    "Error while switching to device",
+)
+
+
+def _run_mdrun_with_gpu_retry(argv: list[str], cwd: Path, cfg: dict,
+                              resume_argv: list[str], dry_run: bool = False,
+                              env: dict | None = None) -> str:
+    """Run mdrun, retrying only when the failure is a busy/absent GPU.
+
+    Deliberately narrow: any other non-zero exit propagates immediately, because a blown-up
+    system or a bad topology must NOT be retried into looking like a transient. Retries
+    pass ``-cpi`` so an attempt that got partway resumes rather than restarting.
+    """
+    attempts = int(cfg["cluster"].get("gpu_retry_attempts", 3))
+    delay_s = float(cfg["cluster"].get("gpu_retry_delay_s", 60))
+    for attempt in range(1, attempts + 1):
+        try:
+            extra = resume_argv if attempt > 1 and (cwd / "prod.cpt").exists() else []
+            return _run([*argv, *extra], cwd=cwd, dry_run=dry_run, env=env)
+        except ToolError as exc:
+            transient = any(sig in str(exc) for sig in _GPU_BUSY_SIGNATURES)
+            if not transient or attempt == attempts:
+                raise
+            _log(f"GPU unavailable (attempt {attempt}/{attempts}); retrying in {delay_s:.0f}s")
+            time.sleep(delay_s)
+    raise AssertionError("unreachable")
+
+
 def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
                    smoke: bool = False, dry_run: bool = False) -> dict:
     """Run one lambda window under GROMACS and return reduced potentials at every state.
@@ -850,10 +887,14 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     # without it a killed window has no checkpoint to resume from (CLAUDE.md: assume
     # windows die). fep.checkpoint_interval_steps is the perses engine's key, not this one.
     cpt = ["-cpt", str(fcfg["checkpoint_interval_min"])]
-    _run([*mdrun_argv(cfg), "-deffnm", "prod",
-          *resume, "-cpo", "prod.cpt", *cpt,
-          "-dhdl", "dhdl.xvg"], cwd=run_dir, dry_run=dry_run,
-         env={"OMP_NUM_THREADS": str(cfg["cluster"]["mdrun_ntomp"])})
+    _run_mdrun_with_gpu_retry(
+        [*mdrun_argv(cfg), "-deffnm", "prod", *resume, "-cpo", "prod.cpt", *cpt,
+         "-dhdl", "dhdl.xvg"],
+        cwd=run_dir, cfg=cfg, dry_run=dry_run,
+        env={"OMP_NUM_THREADS": str(cfg["cluster"]["mdrun_ntomp"])},
+        # a retry resumes from whatever the failed attempt checkpointed
+        resume_argv=["-cpi", "prod.cpt", "-append"],
+    )
 
     if dry_run:
         return {"lambda_index": window, "n_states": n_states,

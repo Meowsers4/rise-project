@@ -247,6 +247,11 @@ cluster:
                                     # rank per window is exactly what we want, so there is
                                     # no mpirun and no -ntmpi.
   mdrun_ntomp: 8                    # keep equal to cluster.pe_omp
+  gpu_retry_attempts: 3             # mdrun dies with CUDA #46 (device busy) when two
+  gpu_retry_delay_s: 60             # array tasks launch into the same GPU in the same
+                                    # instant -- transient, and it cost 4 windows on
+                                    # 2026-08-09. Retried ONLY on that signature; a blown-up
+                                    # system still fails immediately.
   mdrun_gpu_flags: "-nb gpu -pme gpu"   # offload nonbonded + PME. NOTE: with free-energy
                                     # on, GROMACS computes the PERTURBED interactions on
                                     # CPU regardless, so FEP never reaches plain-MD GPU
