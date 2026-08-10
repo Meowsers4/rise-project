@@ -151,37 +151,77 @@ def collect_provenance(fep_dir: Path, variant: str, legs: list[str], n_reps: int
     return provenances, protocols
 
 
-def mbar_leg_dg_kT(u_kn: np.ndarray, N_k: np.ndarray) -> tuple[float, float]:
-    """MBAR free energy difference between end states (kT units) and its stat error.
+def solve_leg_mbar(u_kn: np.ndarray, N_k: np.ndarray) -> dict:
+    """Solve MBAR ONCE for a leg and return everything downstream needs.
 
-    Samples must already be decorrelated (see :func:`decorrelate_window`); MBAR's
-    uncertainty is only meaningful for statistically independent samples.
+    Previously ``mbar_leg_dg_kT`` and ``mbar_leg_overlap`` each constructed their own
+    ``MBAR``, so every (leg, replicate) was solved twice. Harmless at 151 samples/window;
+    at 3001 it doubles an already expensive step, and it also allowed the free energy and
+    the overlap matrix to come from two independently-converged solves.
+
+    Captures pymbar's solver chatter. "Failed to reach a solution to within tolerance with
+    hybr: trying next method" means the first self-consistent solver gave up and a
+    fallback took over -- pymbar prints this to stdout rather than raising, so without
+    capturing it a marginal solve is invisible. Recorded, not fatal: the fallbacks are
+    legitimate, but a run that needed them should say so in its diagnostics.
+
+    Returns:
+        dict with ``dg_kT``, ``ddg_kT``, ``overlap`` (nested lists), ``min_adjacent``
+        and ``solver_notes``.
+
+    Raises:
+        FloatingPointError: If MBAR returns a non-finite free energy or uncertainty --
+            an unconverged solve that would otherwise become a confident-looking number.
     """
+    import contextlib
+    import io
+
     from pymbar import MBAR  # lazy: keeps the pure helpers importable without pymbar
 
-    mbar = MBAR(u_kn, N_k)
-    res = mbar.compute_free_energy_differences()
-    return float(res["Delta_f"][0, -1]), float(res["dDelta_f"][0, -1])
+    chatter = io.StringIO()
+    with contextlib.redirect_stdout(chatter):
+        mbar = MBAR(u_kn, N_k)
+        res = mbar.compute_free_energy_differences()
+        overlap = np.asarray(mbar.compute_overlap()["matrix"], dtype=float)
+
+    dg = float(res["Delta_f"][0, -1])
+    ddg = float(res["dDelta_f"][0, -1])
+    if not (np.isfinite(dg) and np.isfinite(ddg)):
+        raise FloatingPointError(
+            f"MBAR returned a non-finite free energy (dg={dg}, ddg={ddg}). The solver did "
+            "not converge; refusing to report a number."
+        )
+
+    adjacent = [float(overlap[k, k + 1]) for k in range(overlap.shape[0] - 1)]
+    notes = sorted({line.strip() for line in chatter.getvalue().splitlines() if line.strip()})
+    return {
+        "dg_kT": dg,
+        "ddg_kT": ddg,
+        "overlap": overlap.tolist(),
+        "min_adjacent": min(adjacent) if adjacent else float("nan"),
+        "solver_notes": notes,
+    }
+
+
+def mbar_leg_dg_kT(u_kn: np.ndarray, N_k: np.ndarray) -> tuple[float, float]:
+    """Free energy difference between end states (kT) and its stat error.
+
+    Thin wrapper on :func:`solve_leg_mbar`, kept because it is the documented unit of the
+    analyzer and is what the oscillator tests exercise.
+    """
+    r = solve_leg_mbar(u_kn, N_k)
+    return r["dg_kT"], r["ddg_kT"]
 
 
 def mbar_leg_overlap(u_kn: np.ndarray, N_k: np.ndarray) -> tuple[list[list[float]], float]:
     """MBAR phase-space overlap matrix and the worst adjacent-window overlap.
 
-    The nearest-neighbour diagonal is what decides whether a lambda ladder is dense
-    enough: if adjacent windows barely overlap, MBAR's estimate is an extrapolation and
-    its error bar understates the truth. Reported per (leg, replicate) because claim C2
-    (apo-2SH convergence, README §2.3) cannot be argued retroactively.
-
-    Returns:
-        ``(matrix, min_adjacent)`` -- the full overlap matrix as nested lists (JSON-safe)
-        and the smallest ``O[k, k+1]``.
+    The nearest-neighbour diagonal decides whether a lambda ladder is dense enough: if
+    adjacent windows barely overlap, MBAR is extrapolating and its error bar understates
+    the truth. Carries claim C2, which cannot be argued retroactively.
     """
-    from pymbar import MBAR
-
-    mbar = MBAR(u_kn, N_k)
-    o = np.asarray(mbar.compute_overlap()["matrix"], dtype=float)
-    adjacent = [float(o[k, k + 1]) for k in range(o.shape[0] - 1)]
-    return o.tolist(), (min(adjacent) if adjacent else float("nan"))
+    r = solve_leg_mbar(u_kn, N_k)
+    return r["overlap"], r["min_adjacent"]
 
 
 def leg_hysteresis_kT(per_window: list[np.ndarray]) -> float:
@@ -255,6 +295,7 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
     decorrelate = bool(fcfg.get("decorrelate", True))
     per_rep_ddg, per_rep_stat_var, hysteresis_kcal = [], [], []
     diagnostics: list[dict] = []
+    solver_notes: set[str] = set()
     n_raw_total = n_used_total = 0
     for rep in range(n_reps):
         leg_dg, leg_var = {}, {}
@@ -263,19 +304,21 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
                 fep_dir, variant, leg, rep, n_states, decorrelate=decorrelate)
             n_raw_total += n_raw
             n_used_total += int(N_k.sum())
-            dg_kT, ddg_kT = mbar_leg_dg_kT(u_kn, N_k)
-            leg_dg[leg] = dg_kT * kT
-            leg_var[leg] = (ddg_kT * kT) ** 2
+            solved = solve_leg_mbar(u_kn, N_k)          # one MBAR per (leg, replicate)
+            leg_dg[leg] = solved["dg_kT"] * kT
+            leg_var[leg] = (solved["ddg_kT"] * kT) ** 2
             leg_hyst = leg_hysteresis_kT(per_window) * kT
             hysteresis_kcal.append(leg_hyst)
-            overlap, min_adjacent = mbar_leg_overlap(u_kn, N_k)
+            if solved["solver_notes"]:
+                solver_notes.update(solved["solver_notes"])
             diagnostics.append({
                 "leg": leg, "replicate": rep,
-                "dg_kcal": leg_dg[leg], "dg_err_kcal": float(ddg_kT * kT),
+                "dg_kcal": leg_dg[leg], "dg_err_kcal": float(solved["ddg_kT"] * kT),
                 "hysteresis_kcal": leg_hyst,
-                "min_adjacent_overlap": min_adjacent,
+                "min_adjacent_overlap": solved["min_adjacent"],
                 "samples_per_window": [int(n) for n in N_k],
-                "overlap_matrix": overlap,
+                "solver_notes": solved["solver_notes"],
+                "overlap_matrix": solved["overlap"],
             })
         # ΔΔG = folded - unfolded (positive = destabilizing)
         per_rep_ddg.append(leg_dg["folded"] - leg_dg["unfolded"])
@@ -324,6 +367,7 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
         "max_cycle_closure_kcal": max_closure,
         "converged": converged,
         "min_adjacent_overlap": min(d["min_adjacent_overlap"] for d in diagnostics),
+        "solver_notes": sorted(solver_notes),
         "legs": diagnostics,
     }, indent=2))
     return result

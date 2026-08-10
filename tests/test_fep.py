@@ -472,3 +472,48 @@ def test_mdrun_retries_a_busy_gpu_but_not_a_blown_up_system(monkeypatch, tmp_pat
         pmx_engine._run_mdrun_with_gpu_retry(
             ["gmx", "mdrun"], cwd=tmp_path, cfg=cfg, resume_argv=[])
     assert len(calls) == 3
+
+
+def test_mbar_solver_is_run_once_and_refuses_a_non_finite_result(monkeypatch):
+    """One solve per (leg, replicate), and an unconverged solve must not become a number.
+
+    pymbar prints "Failed to reach a solution to within tolerance with hybr: trying next
+    method" to STDOUT and carries on with a fallback -- it does not raise. Twelve of those
+    appeared for a 3-replicate variant, which is 6 legs x 2 because the free energy and
+    the overlap matrix were each constructing their own MBAR.
+    """
+    from src.fep import analyze
+
+    calls = []
+
+    class FakeMBAR:
+        def __init__(self, u_kn, N_k):
+            calls.append(1)
+            print("Failed to reach a solution to within tolerance with hybr: trying next method")
+
+        def compute_free_energy_differences(self):
+            n = 3
+            return {"Delta_f": np.full((n, n), 2.0), "dDelta_f": np.full((n, n), 0.1)}
+
+        def compute_overlap(self):
+            return {"matrix": np.full((3, 3), 1 / 3)}
+
+    import sys
+    import types
+    fake = types.ModuleType("pymbar")
+    fake.MBAR = FakeMBAR
+    monkeypatch.setitem(sys.modules, "pymbar", fake)
+
+    out = analyze.solve_leg_mbar(np.zeros((3, 30)), np.array([10, 10, 10]))
+    assert len(calls) == 1, "MBAR must be constructed once, not once per quantity"
+    assert out["dg_kT"] == 2.0 and out["min_adjacent"] == pytest.approx(1 / 3)
+    # the solver's fallback chatter is captured rather than lost to stdout
+    assert any("hybr" in n for n in out["solver_notes"])
+
+    class NonFinite(FakeMBAR):
+        def compute_free_energy_differences(self):
+            return {"Delta_f": np.full((3, 3), np.nan), "dDelta_f": np.full((3, 3), 0.1)}
+
+    fake.MBAR = NonFinite
+    with pytest.raises(FloatingPointError, match="non-finite"):
+        analyze.solve_leg_mbar(np.zeros((3, 30)), np.array([10, 10, 10]))

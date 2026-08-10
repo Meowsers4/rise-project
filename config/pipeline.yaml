@@ -34,7 +34,14 @@ structure:
                             # pdb2gmx rebuilds hydrogens under the pmx force field anyway.
   ion_conc_M: 0.15
   ph: 7.0                   # Stage 1 protonation pH (PDBFixer addMissingHydrogens)
-  solvent_padding_nm: 1.0   # min solute-box padding for Modeller.addSolvent
+  solvent_padding_nm: 1.2   # min solute-box padding. Used by Stage 1 (Modeller.addSolvent)
+                            # AND by Stage 3 (`editconf -d`).
+                            # RAISED from 1.0 on 2026-08-09. At 1.0 against
+                            # fep.nonbonded_cutoff_nm 1.0 the minimum periodic-image
+                            # distance was exactly 2x the cutoff -- the theoretical floor,
+                            # with no slack for the protein reorienting or the box
+                            # breathing under NPT. Costs ~20% more atoms per window.
+                            # Changing this invalidates every cached system/ directory.
   rebuild_missing_loops: true  # 3ECU has disordered metal-binding loops (D5) -> rebuild
 
 panel:

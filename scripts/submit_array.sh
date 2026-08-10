@@ -30,6 +30,9 @@
 #$ -j y
 #$ -cwd
 #$ -o logs/fep/
+# MUST equal fep.legs * fep.lambda_windows * fep.replicates (2*18*3). SGE cannot template
+# this from config, so the guard below re-derives it and aborts on a mismatch. If you raise
+# fep.replicates to 5, change this to 1-180 IN THE SAME COMMIT or every task exits 2.
 #$ -t 1-108
 
 # NOT -u: GROMACS's GMXRC (sourced via scc_env.sh) reads unbound $shell/$GMXLDLIB and
