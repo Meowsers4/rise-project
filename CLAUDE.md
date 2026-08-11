@@ -178,6 +178,13 @@ This exists because fabricated ΔΔG files (experimental values + noise) once pr
      tasks), so `module` is undefined. `cluster.lmod_init` pins
      `/usr/local/lmod/8.7.12/init/bash`; a stale broken 7.8 tree sorts ahead of it in globs.
   3. SCC home has a 10 GB quota — conda envs must live under `/projectnb`.
+  4. `-l gpu_c=7.0` is a **minimum** (SGE relation `<=`), so it also admits cards NEWER
+     than the GROMACS build. `scc-702`'s RTX PRO 6000 Blackwell (compute 12.0) has no
+     sm_120 kernels in GROMACS 2025.3/CUDA 12.8, so mdrun starts, JIT-compiles the
+     embedded PTX, and dies with `CUDA error #218 (cudaErrorInvalidPtx)`. `submit_array.sh`
+     therefore also pins `-l gpu_type=L40S` (32 nodes; all timings are measured there).
+     Do NOT add this error to the mdrun retry signatures — it is deterministic per node,
+     so a retry on the same host fails identically and hides a placement problem.
 - Checkpoint long GPU jobs; assume windows will die and must resume.
 - Honor `cluster.trajectory_retention` — do not persist raw frames when the config
   says estimates only (disk fills fast).

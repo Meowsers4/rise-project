@@ -24,6 +24,15 @@
 #$ -P rise-batteries
 #$ -l gpus=1
 #$ -l gpu_c=7.0
+# Pin the GPU MODEL, not just a capability floor. gpu_c has SGE relation `<=`, i.e. it is
+# a MINIMUM -- so a card NEWER than this GROMACS build also satisfies it. scc-702 carries
+# an RTX PRO 6000 Blackwell (compute 12.0); GROMACS 2025.3 was built against CUDA 12.8 and
+# ships no sm_120 kernels, so the driver JIT-compiles the embedded PTX and fails with
+# `CUDA error #218 (cudaErrorInvalidPtx)` -- after mdrun has already started, so it looks
+# like a run failure rather than a placement problem. Killed A4V unfolded/w17_r0 on
+# 2026-08-11 while the other 107 windows ran fine on L40S. 32 L40S nodes are available, so
+# pinning costs no meaningful queue time and makes window timings comparable.
+#$ -l gpu_type=L40S
 #$ -l h_rt=12:00:00
 #$ -pe omp 8
 #$ -N sod1_fep
