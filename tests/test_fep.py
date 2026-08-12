@@ -517,3 +517,52 @@ def test_mbar_solver_is_run_once_and_refuses_a_non_finite_result(monkeypatch):
     fake.MBAR = NonFinite
     with pytest.raises(FloatingPointError, match="non-finite"):
         analyze.solve_leg_mbar(np.zeros((3, 30)), np.array([10, 10, 10]))
+
+
+def test_resume_guard_refuses_an_unstamped_checkpoint(tmp_path):
+    """An UNSTAMPED run directory is not a fresh one -- its provenance is unknown.
+
+    G93A, 2026-08-11: run dirs predating the fingerprint survived a protocol change,
+    mdrun resumed their already-complete prod.cpt (both protocols share nsteps), appended
+    nothing, and the stale 176-record dhdl.xvg was sliced by the new discard of 500. All
+    108 windows were written as (18, 0) carrying the NEW hash. The guard compared only
+    when a stamp existed, so it failed open on exactly the case it was written for.
+    """
+    from src.fep.pmx_engine import ToolError, assert_resumable
+
+    run_dir = tmp_path / "w0_r0"
+    run_dir.mkdir()
+
+    # fresh directory, no checkpoint: allowed, and stamped for next time
+    assert_resumable(run_dir, "NEW0000")
+    assert (run_dir / "protocol.sha").read_text().strip() == "NEW0000"
+
+    # matching stamp + checkpoint: a legitimate resume
+    (run_dir / "prod.cpt").write_bytes(b"cpt")
+    assert_resumable(run_dir, "NEW0000")
+
+    # stamp disagrees: refuse
+    (run_dir / "protocol.sha").write_text("OLD0000\n")
+    with pytest.raises(ToolError, match="OLD0000"):
+        assert_resumable(run_dir, "NEW0000")
+
+    # NO stamp but a checkpoint exists: the actual G93A case -- must also refuse
+    (run_dir / "protocol.sha").unlink()
+    with pytest.raises(ToolError, match="pre-fingerprint"):
+        assert_resumable(run_dir, "NEW0000")
+
+
+def test_window_with_no_production_samples_is_refused():
+    """(n_states, 0) must raise here, not IndexError inside pymbar much later.
+
+    The real G93A numbers: 176 records in a stale dhdl.xvg against a discard of 500.
+    Written silently, it surfaced as `IndexError: index 0 is out of bounds for axis 0
+    with size 0` from mbar_solvers, with nothing pointing at the cause.
+    """
+    from src.fep.pmx_engine import discard_equilibration
+
+    ok = discard_equilibration(np.zeros((18, 3501)), 500, "A4V/folded w0 r0")
+    assert ok.shape == (18, 3001)
+
+    with pytest.raises(ValueError, match="176 records"):
+        discard_equilibration(np.zeros((18, 176)), 500, "G93A/folded w0 r0")

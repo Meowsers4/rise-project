@@ -815,6 +815,59 @@ def _run_mdrun_with_gpu_retry(argv: list[str], cwd: Path, cfg: dict,
     raise AssertionError("unreachable")
 
 
+def assert_resumable(run_dir: Path, protocol: str) -> None:
+    """Refuse to resume a run directory whose samples came from another protocol.
+
+    An UNSTAMPED directory is not a fresh one -- it is one whose provenance cannot be
+    established, and it must be treated as a mismatch. G93A on 2026-08-11: run dirs
+    predating the fingerprint survived a protocol change, mdrun resumed their
+    already-complete ``prod.cpt`` (both protocols happen to share ``nsteps``), appended
+    nothing, and the stale 176-record ``dhdl.xvg`` was then sliced by the new discard of
+    500. Every window was written as ``(18, 0)`` carrying the NEW hash. The guard compared
+    only when a stamp existed, so it failed open on exactly the case it was written for.
+
+    Stamps the directory on success, so the next attempt can be checked.
+
+    Raises:
+        ToolError: If a checkpoint exists and its protocol is absent or different.
+    """
+    stamp = run_dir / "protocol.sha"
+    recorded = stamp.read_text().strip() if stamp.exists() else None
+    if recorded != protocol and (run_dir / "prod.cpt").exists():
+        was = recorded or "UNKNOWN (pre-fingerprint)"
+        raise ToolError(
+            f"{run_dir}: a checkpoint exists from protocol {was}, but the current config "
+            f"gives {protocol}. Resuming would mix incompatible samples in dhdl.xvg. "
+            "Delete this run directory (or the whole variant) and restart it under the "
+            "new protocol."
+        )
+    stamp.write_text(protocol + "\n")
+
+
+def discard_equilibration(u_kn: np.ndarray, discard: int, label: str) -> np.ndarray:
+    """Drop the leading equilibration records, refusing to return an empty window.
+
+    A window with no samples is not a result. This fires when ``dhdl.xvg`` holds FEWER
+    records than the discard -- e.g. mdrun resumed an already-complete checkpoint written
+    under a coarser ``nstdhdl`` and appended nothing. Written silently, ``(n_states, 0)``
+    surfaces much later as ``IndexError: index 0 is out of bounds`` from inside pymbar's
+    solver, with nothing pointing at the real cause.
+
+    Raises:
+        ValueError: If nothing survives the discard.
+    """
+    n_records = u_kn.shape[1]
+    out = u_kn[:, discard:]
+    if out.shape[1] == 0:
+        raise ValueError(
+            f"{label}: dhdl.xvg holds {n_records} records but {discard} are discarded as "
+            "equilibration, leaving nothing. The run produced no production samples -- "
+            "most likely mdrun resumed a stale checkpoint from a different protocol. "
+            "Delete this run directory and re-run the window."
+        )
+    return out
+
+
 def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
                    smoke: bool = False, dry_run: bool = False) -> dict:
     """Run one lambda window under GROMACS and return reduced potentials at every state.
@@ -861,16 +914,14 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     # a dhdl.xvg written under whatever config was live when it started. Killed under one
     # protocol, resumed under another, and the file silently contains both while claiming
     # the new hash. Pin it on first write and refuse a mismatched resume.
-    stamp = run_dir / "protocol.sha"
+    # An UNSTAMPED run directory is not a fresh one -- it is a directory whose provenance
+    # we cannot establish. G93A on 2026-08-11: pre-fingerprint run dirs survived, mdrun
+    # resumed their already-complete prod.cpt (both protocols happen to share nsteps),
+    # wrote nothing, and the stale 176-record dhdl.xvg was then sliced by the new
+    # discard of 500 -- producing empty windows stamped with the NEW hash. The guard
+    # failed OPEN because it only compared when the stamp existed.
     if not dry_run:
-        if stamp.exists() and stamp.read_text().strip() != protocol:
-            raise ToolError(
-                f"{run_dir}: this window's samples were produced under protocol "
-                f"{stamp.read_text().strip()}, but the current config gives {protocol}. "
-                "Resuming would append incompatible samples to dhdl.xvg. Delete the run "
-                "directory to restart this window under the new protocol."
-            )
-        stamp.write_text(protocol + "\n")
+        assert_resumable(run_dir, protocol)
 
     _write_mdp(run_dir / "prod.mdp", mdp_text, dry_run)
 
@@ -912,7 +963,7 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
         equil_steps = int(round(float(fcfg["equilibration_ns"]) * 1000.0 / dt_ps))
     nstdhdl = max(1, production_steps // frames)
     discard = (equil_steps + nstdhdl - 1) // nstdhdl
-    u_kn = u_kn[:, discard:]
+    u_kn = discard_equilibration(u_kn, discard, f"{variant}/{leg} w{window} r{rep}")
     if not np.all(np.isfinite(u_kn)):
         bad = int((~np.isfinite(u_kn)).sum())
         raise FloatingPointError(
