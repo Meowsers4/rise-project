@@ -489,7 +489,10 @@ def test_mbar_solver_is_run_once_and_refuses_a_non_finite_result(monkeypatch):
     class FakeMBAR:
         def __init__(self, u_kn, N_k):
             calls.append(1)
-            print("Failed to reach a solution to within tolerance with hybr: trying next method")
+            # pymbar emits this on STDERR, not stdout -- capturing only stdout reported
+            # an empty solver_notes for a run that had five fallbacks.
+            print("Failed to reach a solution to within tolerance with hybr: trying next method",
+                  file=sys.stderr)
 
         def compute_free_energy_differences(self):
             n = 3

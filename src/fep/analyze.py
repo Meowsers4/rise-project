@@ -178,8 +178,12 @@ def solve_leg_mbar(u_kn: np.ndarray, N_k: np.ndarray) -> dict:
 
     from pymbar import MBAR  # lazy: keeps the pure helpers importable without pymbar
 
+    # BOTH streams: pymbar prints "Failed to reach a solution to within tolerance with
+    # hybr: trying next method" to STDERR, so capturing stdout alone reported an empty
+    # solver_notes for a G93A run that had five fallbacks -- instrumentation that says
+    # "clean" when it is not is worse than none.
     chatter = io.StringIO()
-    with contextlib.redirect_stdout(chatter):
+    with contextlib.redirect_stdout(chatter), contextlib.redirect_stderr(chatter):
         mbar = MBAR(u_kn, N_k)
         res = mbar.compute_free_energy_differences()
         overlap = np.asarray(mbar.compute_overlap()["matrix"], dtype=float)
