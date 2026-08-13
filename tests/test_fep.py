@@ -569,3 +569,38 @@ def test_window_with_no_production_samples_is_refused():
 
     with pytest.raises(ValueError, match="176 records"):
         discard_equilibration(np.zeros((18, 176)), 500, "G93A/folded w0 r0")
+
+
+def test_persistent_gpu_unavailability_asks_sge_to_reschedule(monkeypatch, tmp_path):
+    """Waiting cannot fix a device this host will never give us -- only moving can.
+
+    SGE's `gpus` complex is bookkeeping, not enforcement, and the cards are in
+    Exclusive_Process mode, so another user's context makes a device unusable while the
+    scheduler still counts it free. A4V/G93A/F64A each lost exactly the first task of a
+    leg this way, F64A even with 12 retries over 24 minutes on two DIFFERENT nodes.
+    Exit 99 is Grid Engine's "reschedule this task".
+    """
+    from src.fep import pmx_engine
+
+    cfg = {"cluster": {"gpu_retry_attempts": 3, "gpu_retry_delay_s": 0}}
+    monkeypatch.setattr(pmx_engine.time, "sleep", lambda _s: None)
+
+    def always_busy(cmd, cwd, stdin=None, dry_run=False, env=None):
+        raise pmx_engine.ToolError(
+            "Error while switching to device #0. CUDA error #46 "
+            "(cudaErrorDevicesUnavailable): CUDA-capable device(s) is/are busy")
+
+    monkeypatch.setattr(pmx_engine, "_run", always_busy)
+    with pytest.raises(pmx_engine.GpuUnavailableError, match="place this task elsewhere"):
+        pmx_engine._run_mdrun_with_gpu_retry(
+            ["gmx", "mdrun"], cwd=tmp_path, cfg=cfg, resume_argv=[])
+
+    # a genuine failure must stay a plain ToolError -- rescheduling it would loop forever
+    def exploded(cmd, cwd, stdin=None, dry_run=False, env=None):
+        raise pmx_engine.ToolError("Fatal error:\nLINCS: bond length 9572052.0000")
+
+    monkeypatch.setattr(pmx_engine, "_run", exploded)
+    with pytest.raises(pmx_engine.ToolError) as caught:
+        pmx_engine._run_mdrun_with_gpu_retry(
+            ["gmx", "mdrun"], cwd=tmp_path, cfg=cfg, resume_argv=[])
+    assert not isinstance(caught.value, pmx_engine.GpuUnavailableError)

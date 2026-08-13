@@ -37,6 +37,11 @@
 #$ -pe omp 8
 #$ -N sod1_fep
 #$ -j y
+# Rerunnable: src.fep.window exits 99 when mdrun cannot get a usable GPU on this host,
+# and Grid Engine only honours 99-means-reschedule for a rerunnable task. Safe here
+# because a rescheduled task resumes from prod.cpt and assert_resumable() refuses to
+# resume across a protocol change.
+#$ -r y
 #$ -cwd
 #$ -o logs/fep/
 # MUST equal fep.legs * fep.lambda_windows * fep.replicates (2*18*3). SGE cannot template

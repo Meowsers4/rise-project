@@ -178,7 +178,16 @@ This exists because fabricated ΔΔG files (experimental values + noise) once pr
      tasks), so `module` is undefined. `cluster.lmod_init` pins
      `/usr/local/lmod/8.7.12/init/bash`; a stale broken 7.8 tree sorts ahead of it in globs.
   3. SCC home has a 10 GB quota — conda envs must live under `/projectnb`.
-  4. `-l gpu_c=7.0` is a **minimum** (SGE relation `<=`), so it also admits cards NEWER
+  4. **A scheduler-assigned GPU is not a guaranteed GPU.** `gpus` is a JOB consumable used
+     for bookkeeping, not enforcement, and the cards run in `Exclusive_Process` mode — so
+     another user's context makes a device unusable while SGE still counts it free. mdrun
+     then dies with `CUDA error #46` / "no GPU is detected". Waiting cannot help (F64A
+     burned 12 retries over 24 min on two different nodes); only moving the task can.
+     `_run_mdrun_with_gpu_retry` raises `GpuUnavailableError`, `src.fep.window` exits
+     **99**, and `submit_array.sh` sets `#$ -r y` so Grid Engine reschedules. Retry a few
+     times first (`cluster.gpu_retry_*`) for the genuinely brief case; do NOT reschedule
+     on any other failure, or a blown-up system loops forever.
+  5. `-l gpu_c=7.0` is a **minimum** (SGE relation `<=`), so it also admits cards NEWER
      than the GROMACS build. `scc-702`'s RTX PRO 6000 Blackwell (compute 12.0) has no
      sm_120 kernels in GROMACS 2025.3/CUDA 12.8, so mdrun starts, JIT-compiles the
      embedded PTX, and dies with `CUDA error #218 (cudaErrorInvalidPtx)`. `submit_array.sh`

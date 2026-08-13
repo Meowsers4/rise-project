@@ -67,6 +67,18 @@ class ToolError(RuntimeError):
     """A GROMACS/pmx command failed; carries the tail of its output."""
 
 
+class GpuUnavailableError(ToolError):
+    """mdrun could not get a usable GPU on THIS host, after exhausting retries.
+
+    Distinct from ToolError because the remedy is different: nothing about the run is
+    wrong, the task is simply on a node whose device it cannot have. SGE's ``gpus``
+    complex is bookkeeping, not enforcement, and the cards are in Exclusive_Process
+    mode -- so another user's context makes a device unusable while the scheduler still
+    counts it free. Waiting cannot fix that; only moving the task can. :mod:`src.fep.window`
+    turns this into exit status 99, which Grid Engine treats as "reschedule me".
+    """
+
+
 def _run(cmd: list[str], cwd: Path, stdin: str | None = None, dry_run: bool = False,
          env: dict | None = None) -> str:
     """Run one external command, logging it, and fail loudly with its output.
@@ -808,8 +820,15 @@ def _run_mdrun_with_gpu_retry(argv: list[str], cwd: Path, cfg: dict,
             return _run([*argv, *extra], cwd=cwd, dry_run=dry_run, env=env)
         except ToolError as exc:
             transient = any(sig in str(exc) for sig in _GPU_BUSY_SIGNATURES)
-            if not transient or attempt == attempts:
+            if not transient:
                 raise
+            if attempt == attempts:
+                raise GpuUnavailableError(
+                    f"no usable GPU on this host after {attempts} attempts over "
+                    f"{attempts * delay_s / 60:.0f} min. The device SGE assigned is held "
+                    "by another process; waiting longer cannot help, so ask the scheduler "
+                    f"to place this task elsewhere.\n\n{exc}"
+                ) from exc
             _log(f"GPU unavailable (attempt {attempt}/{attempts}); retrying in {delay_s:.0f}s")
             time.sleep(delay_s)
     raise AssertionError("unreachable")

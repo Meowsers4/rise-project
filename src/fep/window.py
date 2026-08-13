@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -153,9 +154,21 @@ def main() -> None:
                              "(real window; not a result). Ignored under FEP_MOCK.")
     args = parser.parse_args()
 
+    # imported here, not at module scope: the mock path must stay importable without a
+    # GROMACS/pmx install (tests, laptops).
+    from src.fep.pmx_engine import GpuUnavailableError
+
     cfg = load_config(args.config)
-    out = run_window(cfg, args.variant, args.leg, args.window, args.rep, args.out,
-                     smoke=args.smoke)
+    try:
+        out = run_window(cfg, args.variant, args.leg, args.window, args.rep, args.out,
+                         smoke=args.smoke)
+    except GpuUnavailableError as exc:
+        # Exit 99 == "reschedule this task" to Grid Engine. The run is not wrong; the task
+        # is on a host whose assigned device it cannot obtain, and only the scheduler can
+        # move it. Losing exactly the first task of each leg to this cost two windows per
+        # variant across A4V/G93A/F64A even with 24 minutes of retrying.
+        print(f"RESCHEDULE: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(99) from exc
     print(f"Wrote window {args.variant}/{args.leg}/w{args.window}_r{args.rep} -> {out}")
 
 
