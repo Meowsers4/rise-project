@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
+from src.fep.analyze import _UNLABELLED_PROTOCOL
 from src.prep.build import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -137,6 +138,22 @@ def evaluate_gate(fep: dict[str, dict], exp: dict[str, float], cfg: dict) -> dic
         obs.append(exp[v])
         closures.append(abs(float(rec["cycle_closure_kcal"])))
 
+    # Every gate variant must have been produced under ONE protocol. analyze.py's
+    # _check_single_protocol guards this WITHIN a variant (its windows share one .mdp);
+    # nothing guarded it ACROSS variants, so a gate could silently mix a pre-fix ΔΔG with
+    # a post-fix one and correlate numbers that are not on the same scale. Fails closed:
+    # which protocol is the right one is not a decision this function can make.
+    protocols = {v: fep[v].get("protocol", _UNLABELLED_PROTOCOL) for v in used}
+    if len(set(protocols.values())) > 1:
+        by_protocol = sorted(f"{p}: {sorted(v for v, q in protocols.items() if q == p)}"
+                             for p in set(protocols.values()))
+        return {"passed": False,
+                "reason": "gate variants span multiple protocols -- re-run so they share "
+                          f"one ({'; '.join(by_protocol)})",
+                "pearson": None, "spearman": None, "n": len(used),
+                "min_pearson": min_pearson, "protocols": protocols,
+                "used": used, "excluded": excluded}
+
     n = len(used)
     if n < min_points:
         return {"passed": False, "reason": f"only {n} usable gate points (< {min_points})",
@@ -176,6 +193,7 @@ def evaluate_gate(fep: dict[str, dict], exp: dict[str, float], cfg: dict) -> dic
             "median_cycle_closure_kcal": median_closure,
             "max_median_cycle_closure_kcal": max_median_closure,
             "pivot_pearson": pivot, "pivot_triggered": pivot_triggered,
+            "protocol": next(iter(set(protocols.values())), _UNLABELLED_PROTOCOL),
             "used": used, "excluded": excluded}
 
 

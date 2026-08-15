@@ -604,3 +604,169 @@ def test_persistent_gpu_unavailability_asks_sge_to_reschedule(monkeypatch, tmp_p
         pmx_engine._run_mdrun_with_gpu_retry(
             ["gmx", "mdrun"], cwd=tmp_path, cfg=cfg, resume_argv=[])
     assert not isinstance(caught.value, pmx_engine.GpuUnavailableError)
+
+
+def test_solver_notes_drops_the_jax_banner_but_keeps_real_warnings():
+    """8800b73 captured stderr so a marginal MBAR solve could not report as clean.
+
+    pymbar's JAX backend then filled solver_notes with its six-line import banner. Nothing
+    was lost (the notes are an unbounded set) but a field that is pure boilerplate stops
+    being read, which defeats the reason stderr is captured at all.
+    """
+    from src.fep.analyze import _solver_notes
+
+    banner = (
+        "******************************************\n"
+        "******* JAX 64-bit mode is now on! *******\n"
+        "*   This MAY cause problems with other   *\n"
+        "*      uses of JAX in the same code.     *\n"
+        "*     JAX is now set to 64-bit mode!     *\n"
+        "******************************************"
+    )
+    assert _solver_notes(banner) == set()
+
+    warning = "Failed to reach a solution to within tolerance with hybr: trying next method"
+    assert _solver_notes(banner + "\n" + warning) == {warning}
+
+
+def test_gate_refuses_to_correlate_variants_from_different_protocols():
+    """analyze._check_single_protocol guards WITHIN a variant; nothing guarded ACROSS them.
+
+    A gate could mix a pre-fix ΔΔG with a post-fix one and correlate numbers that are not
+    on the same scale. Fails closed -- which protocol is correct is not evaluate_gate's
+    decision to make.
+    """
+    from src.analysis.validate import evaluate_gate
+
+    cfg = {"validation": {"gate_subset": ["A", "B", "C"], "min_pearson": 0.7,
+                          "min_gate_points": 2},
+           "fep": {"framework": "gromacs_pmx",
+                   "convergence": {"max_cycle_closure_kcal": 1.0}}}
+    exp = {"A": 1.0, "B": 2.0, "C": 3.0}
+
+    def rec(ddg, protocol):
+        return {"ddg": ddg, "cycle_closure_kcal": 0.2, "converged": True,
+                "provenance": "gromacs_pmx", "protocol": protocol}
+
+    mixed = {"A": rec(1.1, "aaa"), "B": rec(2.1, "bbb"), "C": rec(3.1, "aaa")}
+    verdict = evaluate_gate(mixed, exp, cfg)
+    assert verdict["passed"] is False
+    assert "multiple protocols" in verdict["reason"]
+
+    same = {v: rec(d + 0.1, "aaa") for v, d in exp.items()}
+    passing = evaluate_gate(same, exp, cfg)
+    assert passing["passed"] is True
+    assert passing["protocol"] == "aaa"
+
+
+def test_lambda_ladder_defaults_to_uniform_and_validates_an_explicit_vector():
+    """fep.lambda_vector moves windows where overlap is thin without resizing the array."""
+    import pytest as _pytest
+
+    from src.fep.pmx_engine import lambda_ladder
+
+    uniform = lambda_ladder({"fep": {"lambda_windows": 5}})
+    assert uniform == [0.0, 0.25, 0.5, 0.75, 1.0]
+    assert lambda_ladder({"fep": {"lambda_windows": 5, "lambda_vector": None}}) == uniform
+
+    dense_high = [0.0, 0.4, 0.7, 0.9, 1.0]
+    assert lambda_ladder({"fep": {"lambda_windows": 5, "lambda_vector": dense_high}}) == dense_high
+
+    # Wrong length would desynchronise submit_array.sh's array size and dhdl_to_u_kn.
+    with _pytest.raises(ValueError, match="lambda_windows"):
+        lambda_ladder({"fep": {"lambda_windows": 18, "lambda_vector": dense_high}})
+    with _pytest.raises(ValueError, match="ascend"):
+        lambda_ladder({"fep": {"lambda_windows": 5,
+                               "lambda_vector": [0.0, 0.4, 0.4, 0.9, 1.0]}})
+    with _pytest.raises(ValueError, match="0.0 to 1.0"):
+        lambda_ladder({"fep": {"lambda_windows": 5,
+                               "lambda_vector": [0.0, 0.4, 0.7, 0.9, 0.95]}})
+
+
+def test_independent_replicate_systems_changes_the_path_seed_and_protocol():
+    """The flag alters every window's starting structure while leaving the .mdp identical.
+
+    Without it in the fingerprint a variant could mix shared-box and independent-box
+    replicates and the guard would see one protocol. And with the flag OFF the hash must
+    be unchanged, or turning the key on in config invalidates data it does not affect.
+    """
+    import copy
+
+    import pytest as _pytest
+    import yaml
+
+    from src.fep.pmx_engine import (build_system, production_mdp, protocol_extra,
+                                    protocol_fingerprint, system_dir)
+
+    cfg = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))
+    shared = copy.deepcopy(cfg)
+    shared["fep"]["independent_replicate_systems"] = False
+    per_rep = copy.deepcopy(cfg)
+    per_rep["fep"]["independent_replicate_systems"] = True
+
+    # Shared: one directory, replicate ignored. Per-replicate: one directory each.
+    assert system_dir(shared, "F64A", "folded", 0) == system_dir(shared, "F64A", "folded", 2)
+    assert system_dir(shared, "F64A", "folded", 0).name == "system"
+    assert system_dir(per_rep, "F64A", "folded", 0) != system_dir(per_rep, "F64A", "folded", 2)
+    assert system_dir(per_rep, "F64A", "folded", 2).name == "system_r2"
+
+    # A per-replicate build with no replicate would hand every replicate one box again.
+    with _pytest.raises(ValueError, match="per replicate"):
+        system_dir(per_rep, "F64A", "folded", None)
+    with _pytest.raises(ValueError, match="per replicate"):
+        build_system(per_rep, "F64A", "folded", rep=None, dry_run=True)
+
+    def fp(c):
+        return protocol_fingerprint(production_mdp(c, 0, 1), protocol_extra(c))
+
+    assert protocol_extra(shared) == {}                 # default adds nothing to the hash
+    assert fp(shared) == protocol_fingerprint(production_mdp(shared, 0, 1))
+    assert fp(per_rep) != fp(shared)                    # flipping it IS a protocol change
+
+
+def test_submit_array_task_count_matches_the_config():
+    """`#$ -t` is a static SGE directive; the array size lives in config. They drift.
+
+    submit_array.sh re-derives legs*windows*replicates at run time and aborts on a
+    mismatch -- but only after the array is queued, so every task exits 2 and the wall
+    time is wasted. This catches it at commit time instead. CLAUDE.md rule 5 and the
+    lambda_windows 18 -> 20 change on 2026-08-15 are both about exactly this.
+    """
+    import re
+
+    import yaml
+
+    cfg = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))
+    fcfg = cfg["fep"]
+    expected = len(fcfg["legs"]) * int(fcfg["lambda_windows"]) * int(fcfg["replicates"])
+
+    script = (ROOT / "scripts" / "submit_array.sh").read_text()
+    directives = re.findall(r"^#\$ -t 1-(\d+)\s*$", script, flags=re.MULTILINE)
+    assert len(directives) == 1, f"expected exactly one '#$ -t' directive, got {directives}"
+    assert int(directives[0]) == expected, (
+        f"submit_array.sh declares -t 1-{directives[0]} but "
+        f"legs*lambda_windows*replicates = {expected}. Update the directive and the "
+        "config in the SAME commit."
+    )
+
+
+def test_lambda_vector_in_config_is_the_ladder_the_mdp_gets():
+    """The configured vector must survive into fep-lambdas at the .mdp's 4dp precision.
+
+    A vector written to more precision than '%.4f' would round in the .mdp, so the ladder
+    actually sampled would differ from the one in config -- and the protocol hash would
+    still look fine because it hashes the .mdp.
+    """
+    import yaml
+
+    from src.fep.pmx_engine import lambda_ladder, production_mdp
+
+    cfg = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))
+    ladder = lambda_ladder(cfg)
+    assert len(ladder) == int(cfg["fep"]["lambda_windows"])
+
+    line = next(l for l in production_mdp(cfg, 0, 1).splitlines()
+                if l.startswith("fep-lambdas"))
+    emitted = [float(x) for x in line.split("=", 1)[1].split()]
+    assert emitted == [round(x, 4) for x in ladder]
+    assert emitted == ladder, "config vector rounds when written to the .mdp"

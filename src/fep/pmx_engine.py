@@ -459,22 +459,46 @@ def write_mutation_script(cfg: dict, variant: str, pdb: Path, leg: str, path: Pa
     return line
 
 
-def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Path:
+def system_dir(cfg: dict, variant: str, leg: str, rep: int | None = None) -> Path:
+    """Where this (variant, leg[, replicate])'s solvated, minimised system lives.
+
+    One ``system/`` per leg by default. Under ``fep.independent_replicate_systems`` each
+    replicate gets ``system_r<rep>/`` instead -- see :func:`independent_replicate_systems`
+    for why. MBAR is unaffected: :func:`src.fep.analyze.solve_leg_mbar` solves each
+    (leg, replicate) separately, so the one-Hamiltonian requirement binds the 18 windows
+    WITHIN a replicate, which still share a box, and not across replicates.
+    """
+    leg_dir = ROOT / "results" / "fep" / variant / leg
+    if independent_replicate_systems(cfg):
+        if rep is None:
+            raise ValueError(
+                "fep.independent_replicate_systems is on, so the system is per replicate "
+                "and build_system needs rep=. A shared build under this setting would "
+                "hand every replicate the same starting structure again."
+            )
+        return leg_dir / f"system_r{rep}"
+    return leg_dir / "system"
+
+
+def build_system(cfg: dict, variant: str, leg: str, rep: int | None = None,
+                 dry_run: bool = False) -> Path:
     """Build (once) the solvated, minimised hybrid system for ``variant``/``leg``.
 
-    Cached under ``results/fep/<variant>/<leg>/system/`` and marked complete only when
-    every stage succeeded, so a half-built directory is never silently reused. Every
-    window and replicate of this leg shares it -- MBAR requires one Hamiltonian.
+    Cached under :func:`system_dir` and marked complete only when every stage succeeded,
+    so a half-built directory is never silently reused. Every window of this leg and
+    replicate shares it -- MBAR requires one Hamiltonian across the windows it combines.
 
     All array tasks of a (variant, leg) start at once, so the build is serialised with
     an ``flock``: the first task builds the system, the rest block on the lock and then
     reuse the cached one. Without the lock two tasks can rmtree each other's half-built
-    system mid-build.
+    system mid-build. The lock is per system directory, so under
+    ``fep.independent_replicate_systems`` different replicates build in parallel rather
+    than queueing behind one another.
     """
     fcfg, scfg = cfg["fep"], cfg["structure"]
-    sys_dir = ROOT / "results" / "fep" / variant / leg / "system"
+    sys_dir = system_dir(cfg, variant, leg, rep)
 
-    lock_path = sys_dir.parent / ".system.lock"
+    lock_path = sys_dir.parent / f".{sys_dir.name}.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     # Production grompp also needs GMXLIB when this process reuses an existing system;
     # do this before the marker fast path, not only while constructing the cache.
@@ -497,8 +521,13 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
         wt_pdb = _input_structure(cfg, variant, leg)
         shutil.copy(wt_pdb, sys_dir / "wt.pdb")
 
-        # Deterministic ion placement: same system for every window/replicate.
-        seed = stable_seed(variant, leg, "system")
+        # Deterministic ion placement. Keyed on the replicate too when replicates build
+        # their own systems, so each gets a different genion placement rather than three
+        # copies of one box; keyed without it otherwise, preserving the seed every
+        # already-built system was made with.
+        seed = (stable_seed(variant, leg, rep, "system")
+                if independent_replicate_systems(cfg)
+                else stable_seed(variant, leg, "system"))
 
         n_sg = _count_cys_pairs(sys_dir / "wt.pdb") if not dry_run else 4
         ss_answers = _pdb2gmx_stdin(cfg, n_sg)
@@ -568,7 +597,7 @@ def build_system(cfg: dict, variant: str, leg: str, dry_run: bool = False) -> Pa
 
         if not dry_run:
             (sys_dir / _DONE_MARKER).write_text(
-                f"variant={variant} leg={leg} ff={ff} seed={seed}\n")
+                f"variant={variant} leg={leg} rep={rep} ff={ff} seed={seed}\n")
         _log(f"system ready: {sys_dir}")
         return sys_dir
 
@@ -597,8 +626,7 @@ def _free_energy_lines(cfg: dict, window: int, nstdhdl: int | None = None) -> li
         nstdhdl: dH/dl output stride. ``None`` for minimisation, which writes no dhdl.
     """
     fcfg = cfg["fep"]
-    n_states = int(fcfg["lambda_windows"])
-    lambdas = " ".join(f"{i / (n_states - 1):.4f}" for i in range(n_states))
+    lambdas = " ".join(f"{x:.4f}" for x in lambda_ladder(cfg))
     lines = [
         "free-energy              = yes",
         f"init-lambda-state        = {window}",
@@ -665,10 +693,51 @@ def _minim_mdp(cfg: dict, window: int | None = None) -> str:
     return "\n".join(lines)
 
 
+def lambda_ladder(cfg: dict) -> list[float]:
+    """The ``fep-lambdas`` vector: one lambda per window, ascending 0 -> 1.
+
+    Uniform spacing by default. ``fep.lambda_vector`` overrides it with an explicit list,
+    which is how a ladder is made denser where it needs to be rather than everywhere --
+    F64A's folded leg (2026-08-15) had adjacent-window overlap of 0.018 concentrated at
+    high lambda, where the deleted benzyl group leaves a cavity, while the low-lambda end
+    was fine. Refining uniformly would pay for windows that were already converged.
+
+    ``fep.lambda_windows`` stays authoritative for the COUNT: ``submit_array.sh`` sizes
+    the SGE array from ``legs*windows*replicates``, and :func:`dhdl_to_u_kn` checks the
+    dhdl state count against it, so a vector of a different length would desynchronise
+    both. Mismatch is an error here rather than a silently resized array.
+
+    Raises:
+        ValueError: If ``fep.lambda_vector`` has the wrong length, is not ascending, or
+            does not span exactly 0 to 1.
+    """
+    fcfg = cfg["fep"]
+    n_states = int(fcfg["lambda_windows"])
+    vector = fcfg.get("lambda_vector")
+    if not vector:
+        return [i / (n_states - 1) for i in range(n_states)]
+
+    ladder = [float(x) for x in vector]
+    if len(ladder) != n_states:
+        raise ValueError(
+            f"fep.lambda_vector has {len(ladder)} entries but fep.lambda_windows is "
+            f"{n_states}. submit_array.sh sizes the array from lambda_windows, so these "
+            "must agree -- set both or neither."
+        )
+    if any(b <= a for a, b in zip(ladder, ladder[1:])):
+        raise ValueError(f"fep.lambda_vector must strictly ascend, got {ladder}")
+    if ladder[0] != 0.0 or ladder[-1] != 1.0:
+        raise ValueError(
+            f"fep.lambda_vector must run from 0.0 to 1.0, got {ladder[0]} to {ladder[-1]}. "
+            "The end states are the physical WT and mutant; ΔΔG is meaningless without them."
+        )
+    return ladder
+
+
 _FINGERPRINT_IGNORED_PREFIXES = ("gen-seed", "ld-seed", "init-lambda-state", ";")
 
 
-def protocol_fingerprint(mdp_text: str) -> str:
+def protocol_fingerprint(mdp_text: str, extra: dict | None = None) -> str:
     """Hash of the settings a window was run under, ignoring seed and lambda state.
 
     `provenance` records the ENGINE. It cannot see `sc-coul` flipping or `nstdhdl`
@@ -679,12 +748,53 @@ def protocol_fingerprint(mdp_text: str) -> str:
 
     Seed and `init-lambda-state` are excluded so replicates and windows of ONE protocol
     agree; comments are excluded so re-wording a comment is not a protocol change.
+
+    Args:
+        mdp_text: the generated production ``.mdp``.
+        extra: protocol settings that do NOT appear in the ``.mdp`` but still change what
+            was sampled -- currently ``fep.independent_replicate_systems``, which decides
+            whether replicates share one solvated, minimised box or each get their own.
+            That flag alters the starting configuration of every window while leaving the
+            ``.mdp`` byte-identical, so without it here a variant could mix shared-box and
+            independent-box replicates and the guard would see one protocol.
     """
     body = "\n".join(
         line for line in mdp_text.splitlines()
         if not line.startswith(_FINGERPRINT_IGNORED_PREFIXES)
     )
+    if extra:
+        body += "\n" + "\n".join(f"{k}={extra[k]}" for k in sorted(extra))
     return hashlib.sha256(body.encode()).hexdigest()[:16]
+
+
+def independent_replicate_systems(cfg: dict) -> bool:
+    """Whether each replicate builds its own solvated, minimised system.
+
+    Default False = the historical behaviour: one ``system/`` per (variant, leg), shared
+    by every window and replicate, so replicates differ only in their velocity seed.
+
+    F64A (2026-08-15) is the evidence for making this configurable. Deleting a buried
+    benzyl group opens a cavity the solvent cannot equilibrate into within 3 ns; all three
+    replicates started from the same ``em.gro``, got stuck behind the same barrier, and
+    agreed to 0.64 kcal/mol while the folded leg's hysteresis ran 1.00-2.52. A slow mode
+    that every replicate shares is invisible to the replicate spread, so ``ddg_err``
+    understated the real uncertainty by an order of magnitude.
+    """
+    return bool(cfg["fep"].get("independent_replicate_systems", False))
+
+
+def protocol_extra(cfg: dict) -> dict:
+    """Non-.mdp settings that are part of the protocol (see :func:`protocol_fingerprint`).
+
+    Only NON-DEFAULT settings are included, so a config that leaves them alone hashes
+    exactly as it did before this function existed. Without that, adding the key would
+    have rehashed every window already on the cluster and invalidated physically
+    identical data.
+    """
+    extra = {}
+    if independent_replicate_systems(cfg):
+        extra["independent_replicate_systems"] = True
+    return extra
 
 
 def production_mdp(cfg: dict, window: int, seed: int, smoke: bool = False) -> str:
@@ -899,7 +1009,7 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     gmx = gmx_command(cfg)
 
     _log(f"window start: {variant}/{leg} w{window} r{rep} smoke={smoke} n_states={n_states}")
-    sys_dir = build_system(cfg, variant, leg, dry_run=dry_run)
+    sys_dir = build_system(cfg, variant, leg, rep=rep, dry_run=dry_run)
 
     run_dir = ROOT / "results" / "fep" / variant / leg / f"w{window}_r{rep}"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -927,7 +1037,7 @@ def run_pmx_window(cfg: dict, variant: str, leg: str, window: int, rep: int,
     # is exactly the class of error the provenance rule exists to prevent. The seed is
     # excluded so replicates of one protocol still agree.
     mdp_text = production_mdp(cfg, window, seed, smoke)
-    protocol = protocol_fingerprint(mdp_text)
+    protocol = protocol_fingerprint(mdp_text, protocol_extra(cfg))
 
     # The fingerprint is computed from the CURRENT config, but a resumed window appends to
     # a dhdl.xvg written under whatever config was live when it started. Killed under one

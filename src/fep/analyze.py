@@ -151,6 +151,33 @@ def collect_provenance(fep_dir: Path, variant: str, legs: list[str], n_reps: int
     return provenances, protocols
 
 
+def _solver_notes(chatter: str) -> set[str]:
+    """Solver chatter worth recording, with import-time banners stripped.
+
+    pymbar's JAX backend prints a six-line boxed "JAX 64-bit mode is now on!" banner to
+    stderr the first time it is imported. It carries no information about the solve, and
+    it dominated ``solver_notes`` on the F64A run (five unique lines, the whole field).
+    Nothing was lost -- the notes are an unbounded set, so a real fallback warning would
+    still have appeared alongside it -- but a diagnostics field that is pure boilerplate
+    does not get read, which defeats the reason 8800b73 started capturing stderr at all.
+
+    Drops banner box-drawing (lines that are only ``*`` and spaces) and any line inside
+    such a box, keeping anything pymbar says about the solve itself.
+    """
+    notes: set[str] = set()
+    for raw in chatter.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # Banner lines are wrapped in '*' or consist only of '*' padding.
+        if line.startswith("*") and line.endswith("*"):
+            continue
+        if set(line) <= {"*", " "}:
+            continue
+        notes.add(line)
+    return notes
+
+
 def solve_leg_mbar(u_kn: np.ndarray, N_k: np.ndarray) -> dict:
     """Solve MBAR ONCE for a leg and return everything downstream needs.
 
@@ -197,7 +224,7 @@ def solve_leg_mbar(u_kn: np.ndarray, N_k: np.ndarray) -> dict:
         )
 
     adjacent = [float(overlap[k, k + 1]) for k in range(overlap.shape[0] - 1)]
-    notes = sorted({line.strip() for line in chatter.getvalue().splitlines() if line.strip()})
+    notes = sorted(_solver_notes(chatter.getvalue()))
     return {
         "dg_kT": dg,
         "ddg_kT": ddg,

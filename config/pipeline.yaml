@@ -73,11 +73,76 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
                             # protein mutation FEP, needs no OpenEye, and its workflow is
                             # file-based rather than depending on perses' version-drifty
                             # lower-level API. Also the provenance tag on every result.
-  lambda_windows: 18        # 12 | 18 | 24  -- cost vs precision.
-                            # KEEP 18: windows run independently (no replica exchange), so
-                            # neighbour overlap comes from window density alone. Cutting to
-                            # 12 is the one economy that biases ddG rather than just adding
-                            # noise -- cut replicates/length first.
+  lambda_windows: 20        # 12 | 18 | 24  -- cost vs precision.
+                            # Windows run independently (no replica exchange), so neighbour
+                            # overlap comes from window density alone. Cutting the count is
+                            # the one economy that biases ddG rather than just adding noise
+                            # -- cut replicates/length first.
+                            # RAISED 18 -> 20 on 2026-08-15 for the F64A endpoint (see
+                            # lambda_vector). Array size is legs*windows*replicates = 120,
+                            # so submit_array.sh's `#$ -t` was updated to match.
+  lambda_vector:            # F64A's folded leg (docs/f64a_folded_leg_failure.md) showed a
+                            # HEALTHY ladder with one reproducible hole at the very top:
+                            # mean adjacent overlap 0.145, but 16->17 was 0.047/0.033/0.030
+                            # across the three replicates while 15->16 -- at IDENTICAL
+                            # 0.0588 spacing -- was 0.32. A tenfold difference at the same
+                            # spacing is an endpoint effect, not a spacing effect: the last
+                            # decoupling step opens the cavity and shifts the energy
+                            # distribution more than any other step.
+                            # The thin MID-ladder pairs (2-3, 9-10, 10-11, 12-13) move
+                            # between replicates and are undersampling noise, not a coarse
+                            # ladder -- the same signature HANDOFF recorded for A4V. They
+                            # are NOT refined here; independent_replicate_systems addresses
+                            # them instead.
+                            # So: everything below 0.88 is the old uniform i/17 ladder,
+                            # unchanged, and the four windows above it tighten 0.0588 ->
+                            # 0.025 into the endpoint. Every healthy pair is preserved and
+                            # the change is auditable against that run.
+    - 0.0000
+    - 0.0588
+    - 0.1176
+    - 0.1765
+    - 0.2353
+    - 0.2941
+    - 0.3529
+    - 0.4118
+    - 0.4706
+    - 0.5294
+    - 0.5882
+    - 0.6471
+    - 0.7059
+    - 0.7647
+    - 0.8235
+    - 0.8824
+    - 0.9200
+    - 0.9500
+    - 0.9750
+    - 1.0000
+                            # null = uniform spacing over lambda_windows (the historical
+                            # ladder). A list overrides the SPACING but not the COUNT: it
+                            # must have exactly lambda_windows entries, ascend strictly, and
+                            # start at 0.0 and end at 1.0 (src.fep.pmx_engine.lambda_ladder
+                            # enforces all three). Use it to put windows where overlap is
+                            # thin instead of refining uniformly -- F64A's folded leg had
+                            # min adjacent overlap 0.018 at HIGH lambda (cavity opening as
+                            # the benzyl group is deleted) while the low end was healthy.
+                            # Changing this changes the .mdp and therefore the protocol
+                            # hash: existing windows become unmixable with new ones.
+  independent_replicate_systems: true
+                            # TURNED ON 2026-08-15 for the F64A rerun.
+                            # false = one solvated, minimised system per (variant, leg),
+                            # shared by every replicate; replicates differ only in velocity
+                            # seed. That is why F64A's three replicates agreed to 0.64
+                            # kcal/mol while the folded leg's hysteresis ran 1.00-2.52 --
+                            # they were stuck behind the same solvent barrier, so the spread
+                            # measured nothing and ddg_err understated the error ~10x.
+                            # true = each replicate builds its own box (system_r<rep>/,
+                            # distinct genion placement), which is how you sample a slow
+                            # mode you cannot cross within a window. Costs one extra system
+                            # build per replicate (minutes of CPU, not GPU).
+                            # This does NOT appear in the .mdp, so it is folded into the
+                            # protocol hash separately (pmx_engine.protocol_extra) -- when
+                            # false the hash is byte-identical to before it existed.
   replicates: 3             # >=3 required. 3 = the FLOOR, do not go lower.
                             # PENDING 3 -> 5: README §9 resolved replicates at 5. NOT changed
                             # yet because every running array task re-reads this file and

@@ -1,9 +1,48 @@
 # HANDOFF — SOD1 FEP pipeline
 
-Current state and the ordered work queue. Updated 2026-08-08.
-Supersedes the 2026-08-06 first-light handoff (that blocker is long fixed).
+Current state and the ordered work queue. Updated 2026-08-15.
 
-## Where things stand
+## Where things stand (2026-08-15)
+
+**F64A is the first variant analysed under the post-fix protocol `f9bded6f07b4abe5`, and
+it failed the convergence check.** ΔΔG +6.63 ± 0.19 against an experimental −0.20 — an
+error of +6.83 — with cycle closure 2.52 against a cap of 1.0. Full record in
+[`docs/f64a_folded_leg_failure.md`](docs/f64a_folded_leg_failure.md).
+
+The failure is entirely in the **folded** leg. The unfolded (tripeptide) leg is pristine:
+three replicates within 0.05 kcal/mol, hysteresis 0.14–0.26, overlap 0.072–0.115. The
+folded leg has hysteresis 1.00–2.52, adjacent overlap 0.018–0.033, and 14–27 independent
+samples in its top windows against 3001 raw records — a correlation time rising from ~4 ps
+at low λ to ~111 ps at w13. Deleting a buried benzyl group opens a cavity the solvent
+cannot equilibrate into within a 3 ns window.
+
+**The overlap diagonal ruled out a coarse ladder.** Mean adjacent overlap was 0.145 and the
+thin mid-ladder pairs move between replicates — undersampling noise, the same signature
+recorded for A4V, not spacing. One hole is reproducible and it is the last pair: 16→17 was
+0.047/0.033/0.030 while 15→16, at *identical* 0.0588 spacing, was 0.32. A tenfold
+difference at the same spacing is an endpoint effect.
+
+**Applied 2026-08-15 — new protocol `822108e9db71124d`:**
+
+- `fep.lambda_windows` 18 → **20**, with an explicit `fep.lambda_vector`: everything below
+  λ=0.88 is the old uniform i/17 ladder untouched, and the top four windows tighten
+  0.0588 → 0.025 into the endpoint. Array 108 → **120 tasks**; `submit_array.sh`'s `#$ -t`
+  updated in the same change, and `test_submit_array_task_count_matches_the_config` now
+  fails the commit if those two ever drift.
+- `fep.independent_replicate_systems` → **true**. Each replicate builds its own box and
+  genion seed (`system_r<rep>/`).
+
+**This invalidates A4V and G93A's post-fix windows too** — they are 18-window
+`f9bded6f07b4abe5` runs. They cannot be gated alongside F64A and must be rerun under
+`822108e9db71124d` once the F64A pilot is judged.
+
+**Expectations, set before the run.** This targets convergence, not accuracy. The defects
+identified account for perhaps 1–3 kcal/mol against a 6.83 error, so the likely outcome is
+a *converged* result that is still badly wrong — which is itself the useful answer, because
+it isolates the residual to the force field or the unfolded-state reference rather than
+sampling. Do not treat "still wrong" as a failed experiment.
+
+### Superseded — state as of 2026-08-08
 
 Stage 3 works end to end. One variant is analysed, two are on the cluster.
 
@@ -75,7 +114,7 @@ After pulling, confirm on one window before committing a full array:
 | **`-maxwarn 2`** hardcoded on all four grompp calls; `mdout.mdp` never archived, so we cannot see what grompp chose for `nstpcouple`/`nsttcouple` | may surface warnings needing interpretation | archive `mdout.mdp`, tighten to `-maxwarn 0` and fix what appears |
 | **`cycle_closure_kcal` is not a cycle closure** — it is within-ladder Zwanzig hysteresis, and reads "converged" on a result 2.4 off. It is a *pre-registered* gate criterion. | changing a pre-registered threshold is exactly what pre-registration forbids | ADD an overlap floor as an extra criterion; do not redefine the existing one |
 | **`replicates` 3 → 5** (README §9) | +72 tasks/variant, additive not a rerun | do it between arrays — never mid-flight, the `SGE_TASK_LAST` guard aborts every unstarted task |
-| **Independent replicate systems** — `rep` is not in the system-build seed, so all replicates share one box and one EM structure; only velocities differ | the expensive fix: real NPT equilibration per replicate | decide from the G93A/I113T outcome |
+| ~~**Independent replicate systems**~~ | | **RESOLVED 2026-08-15 by F64A**, not by G93A/I113T. Implemented behind `fep.independent_replicate_systems` (default false, so existing hashes are untouched); each replicate gets its own box and genion seed. F64A's three replicates agreed to 0.64 kcal/mol while the folded leg's hysteresis ran to 2.52 — a slow mode every replicate shares is invisible to the spread. Turn it on for the rerun. |
 | **Trajectory retention** — `nstxout-compressed = 0` blocks testing the interface hypothesis. Conflicts with `cluster.trajectory_retention: estimates_only` | disk | check whether `prod.gro` (final frame) is already enough |
 
 ### 3. Then re-run the gate
