@@ -40,7 +40,9 @@ is the single source of truth for the panel.
    is pending a 3 → 5 raise (README §9). Do NOT raise it while an array is in flight:
    every task re-reads this config and `submit_array.sh` aborts when
    `legs*windows*replicates` disagrees with `SGE_TASK_LAST`. Raise it between arrays;
-   r3/r4 are then additive (72 new tasks per variant), not a rerun.
+   r3/r4 are then additive (80 new tasks per variant at 20 windows), not a rerun — the
+   protocol hash is identical at 3 and 5 replicates, so existing windows stay valid.
+   `#$ -t` must go 120 → 200 in the SAME commit.
 6. **Four claims are load-bearing** (README §2.3): C1 charge-changing coverage,
    C2 apo-2SH convergence, C3 DMS-independent VUS triage, C4 concordance/discordance.
    Weakening one is a scope change needing the user's sign-off, not a refactor. Two
@@ -151,6 +153,24 @@ between arrays. `run_pmx_window` now hashes the production `.mdp` (minus seed an
 `init-lambda-state`) into each window's NPZ as `protocol`, and
 `analyze._check_single_protocol` refuses to analyse a variant whose windows disagree —
 the settings-level counterpart to the engine-level provenance rule below.
+
+## Cycle closure is not a correctness check
+`cycle_closure_kcal` is the forward/reverse Zwanzig hysteresis of ONE ladder, not a closed
+thermodynamic cycle. It measures whether a replicate sampled its own basin consistently —
+it cannot see that the basin is the wrong one. Three results establish this, and they are
+the project's sharpest scientific content (claim C2):
+
+- G93A reports the cleanest closure in the project (0.08) and is 1.05 kcal/mol wrong.
+- F64A's folded r1 has hysteresis **0.02**, the lowest recorded anywhere, and is the
+  replicate that disagrees with its two siblings by 1.2 kcal/mol.
+- G93A's minimum adjacent overlap (0.017) is indistinguishable from F64A's (0.018), yet
+  G93A passes every convergence criterion and F64A fails.
+
+Consequences for day-to-day work: never report `converged: true` as evidence a number is
+right; read `min_adjacent_overlap` and `replicate_spread_kcal` alongside it. Since
+`fep.independent_replicate_systems` was enabled the spread is meaningful (replicates no
+longer share a box), and it is usually the more informative of the two. `ddg_err` has
+understated the true uncertainty 3-10x on every variant measured so far.
 
 ## Results must carry provenance
 Every window records the engine that produced it; `analyze.py` refuses to mix engines or
