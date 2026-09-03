@@ -164,11 +164,11 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   # get stuck in; the folded protein does. Sampling them equally spends ~30% of the
   # compute where there is no defect.
   ns_per_window:
-    folded: 3
-    unfolded: 3
+    folded: 9             # TRIPLED 2026-09-03 after the gate failed at r=0.407.
+    unfolded: 3           # Unfolded left alone -- it is already converged.
   equilibration_ns:         # discarded before MBAR; buys RELAXATION, not samples
-    folded: 0.5
-    unfolded: 0.5
+    folded: 2.0           # raised with production: the diagnosis is that the folded leg
+    unfolded: 0.5         # does not RELAX, and discarded time is what buys relaxation.
   # --- real Perses window: integrator / ensemble / alchemy (read by src/fep/window.py) ---
   # Solvation reuses structure.solvent_padding_nm + structure.ion_conc_M (Perses solvates the
   # WT hybrid). Force field reuses structure.ff_protein + structure.water_model.
