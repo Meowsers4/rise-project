@@ -103,19 +103,32 @@ def test_analyze_refuses_to_mix_protocols_end_to_end(tmp_path):
 
 
 def test_analyze_refuses_to_mix_protocols():
-    """Same engine, different .mdp settings, is still unmixable.
+    """Same engine, different .mdp settings, is still unmixable -- WITHIN a leg.
 
     Provenance catches a mock or another engine. It cannot see sc-coul flipped or nstdhdl
-    changed halfway through a variant -- which is exactly what happens if the SCC is
-    `git pull`ed while an array is in flight.
+    changed halfway through a leg -- which is what `git pull`ing the cluster during a
+    running array produces.
+
+    Across legs is different: fep.ns_per_window and fep.equilibration_ns may be per-leg,
+    so the folded and unfolded legs hash differently BY DESIGN. Each leg is its own MBAR
+    estimate and they never share samples, so that must be allowed.
     """
     from src.fep.analyze import _check_single_protocol
 
-    _check_single_protocol("A4V", {"abc123"})            # one protocol: fine
-    with pytest.raises(ValueError, match="different protocols"):
-        _check_single_protocol("A4V", {"abc123", "def456"})
-    with pytest.raises(ValueError, match="different protocols"):
-        _check_single_protocol("A4V", {"abc123", "unlabelled"})
+    ok = {"folded": {"abc123"}, "unfolded": {"abc123"}}
+    _check_single_protocol("A4V", ok)
+
+    # legs may legitimately differ -- per-leg sampling
+    per_leg = {"folded": {"folded9ns"}, "unfolded": {"unfolded3ns"}}
+    _check_single_protocol("A4V", per_leg)
+
+    # but within one leg they may not
+    with pytest.raises(ValueError, match="A4V/folded"):
+        _check_single_protocol("A4V", {"folded": {"abc123", "def456"},
+                                       "unfolded": {"abc123"}})
+    with pytest.raises(ValueError, match="A4V/unfolded"):
+        _check_single_protocol("A4V", {"folded": {"abc123"},
+                                       "unfolded": {"abc123", "unlabelled"}})
 
 
 def test_forcefield_protonation_names_are_not_wrong_residues():
@@ -333,7 +346,7 @@ def test_protocol_fingerprint_is_seed_and_window_invariant_but_settings_sensitiv
     def fp(c, window, seed):
         # call the PRODUCTION helper -- an earlier version of this test recomputed the
         # hash inline, so breaking the exclusion list in the engine changed nothing here.
-        return protocol_fingerprint(production_mdp(c, window, seed))
+        return protocol_fingerprint(production_mdp(c, window, seed, leg="folded"))
 
     assert fp(cfg, 0, 1) == fp(cfg, 17, 999)        # replicates/windows must agree
 
@@ -717,10 +730,10 @@ def test_independent_replicate_systems_changes_the_path_seed_and_protocol():
         build_system(per_rep, "F64A", "folded", rep=None, dry_run=True)
 
     def fp(c):
-        return protocol_fingerprint(production_mdp(c, 0, 1), protocol_extra(c))
+        return protocol_fingerprint(production_mdp(c, 0, 1, leg="folded"), protocol_extra(c))
 
     assert protocol_extra(shared) == {}                 # default adds nothing to the hash
-    assert fp(shared) == protocol_fingerprint(production_mdp(shared, 0, 1))
+    assert fp(shared) == protocol_fingerprint(production_mdp(shared, 0, 1, leg="folded"))
     assert fp(per_rep) != fp(shared)                    # flipping it IS a protocol change
 
 
@@ -765,8 +778,132 @@ def test_lambda_vector_in_config_is_the_ladder_the_mdp_gets():
     ladder = lambda_ladder(cfg)
     assert len(ladder) == int(cfg["fep"]["lambda_windows"])
 
-    line = next(l for l in production_mdp(cfg, 0, 1).splitlines()
+    line = next(l for l in production_mdp(cfg, 0, 1, leg="folded").splitlines()
                 if l.startswith("fep-lambdas"))
     emitted = [float(x) for x in line.split("=", 1)[1].split()]
     assert emitted == [round(x, 4) for x in ladder]
     assert emitted == ladder, "config vector rounds when written to the .mdp"
+
+
+def test_per_leg_sampling_reaches_the_mdp_and_the_discard():
+    """fep.ns_per_window may differ per leg, and BOTH consumers must honour it.
+
+    The unfolded tripeptide reproduces to ~0.1 kcal/mol across independent boxes while
+    the folded protein spreads to 1.46, so sampling them equally spends about a third of
+    the compute where there is no defect. The hazard is that the .mdp and the
+    equilibration discard are computed in two places; if they disagree, the discard
+    misaligns with what was actually written and the ddG is plausible and wrong.
+    """
+    import copy
+    import yaml
+    from src.fep.pmx_engine import leg_value, production_mdp, window_schedule
+
+    cfg = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))
+    cfg["fep"]["ns_per_window"] = {"folded": 9, "unfolded": 3}
+    cfg["fep"]["equilibration_ns"] = {"folded": 2.0, "unfolded": 0.5}
+
+    assert leg_value(cfg, "ns_per_window", "folded") == 9
+    assert leg_value(cfg, "ns_per_window", "unfolded") == 3
+
+    f = window_schedule(cfg, "folded")
+    u = window_schedule(cfg, "unfolded")
+    # 9 ns + 2 ns at 2 fs = 5.5M steps; 3 ns + 0.5 ns = 1.75M
+    assert f["nsteps"] == 5_500_000 and u["nsteps"] == 1_750_000
+    # the discard must cover the equilibration each leg actually ran
+    assert f["discard"] * f["nstdhdl"] >= f["equil_steps"]
+    assert u["discard"] * u["nstdhdl"] >= u["equil_steps"]
+    assert f["discard"] != u["discard"]
+
+    # and the .mdp the leg gets must carry ITS nsteps, not the other leg's
+    fm = production_mdp(cfg, 0, 1, leg="folded")
+    um = production_mdp(cfg, 0, 1, leg="unfolded")
+    assert "nsteps                   = 5500000" in fm
+    assert "nsteps                   = 1750000" in um
+
+    # a scalar config still works and gives both legs the same schedule
+    scalar = copy.deepcopy(cfg)
+    scalar["fep"]["ns_per_window"] = 3
+    scalar["fep"]["equilibration_ns"] = 0.5
+    assert window_schedule(scalar, "folded") == window_schedule(scalar, "unfolded")
+
+
+def test_per_leg_setting_without_a_leg_raises_rather_than_guessing():
+    """Silently defaulting would give the two legs one sampling length by accident."""
+    import yaml
+    from src.fep.pmx_engine import leg_value, window_schedule
+
+    cfg = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))
+    cfg["fep"]["ns_per_window"] = {"folded": 9, "unfolded": 3}
+    with pytest.raises(ValueError, match="per-leg"):
+        leg_value(cfg, "ns_per_window", None)
+    with pytest.raises(ValueError, match="per-leg"):
+        window_schedule(cfg, None)
+    with pytest.raises(ValueError, match="no entry for leg"):
+        leg_value(cfg, "ns_per_window", "sideways")
+
+
+def test_per_leg_sampling_makes_the_two_legs_hash_differently():
+    """Which is why _check_single_protocol had to become per-leg.
+
+    A leg's windows must agree with each other; the two legs need not agree with one
+    another, because each is a separate MBAR estimate and they never share samples.
+    """
+    import yaml
+    from src.fep.pmx_engine import production_mdp, protocol_fingerprint
+
+    cfg = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))
+    cfg["fep"]["ns_per_window"] = {"folded": 9, "unfolded": 3}
+    fp = lambda leg, w=0, seed=1: protocol_fingerprint(
+        production_mdp(cfg, w, seed, leg=leg))
+    assert fp("folded") != fp("unfolded")          # differ by design
+    assert fp("folded") == fp("folded", w=19, seed=999)   # invariant within a leg
+
+
+def test_run_pmx_window_uses_THIS_leg_schedule_for_both_mdp_and_discard(monkeypatch, tmp_path):
+    """The WIRING, not the helpers.
+
+    Two earlier regressions in this project were guards that existed, were unit-tested,
+    and were not connected. Testing window_schedule() and production_mdp() in isolation
+    passes even if run_pmx_window hardcodes the wrong leg or drops the argument, so this
+    drives the real function with GROMACS stubbed out and asserts that a folded window
+    gets the FOLDED nsteps and the FOLDED discard.
+    """
+    import yaml
+    from src.fep import pmx_engine as pe
+
+    cfg = yaml.safe_load(open(ROOT / "config" / "pipeline.yaml"))
+    cfg["fep"]["ns_per_window"] = {"folded": 9, "unfolded": 3}
+    cfg["fep"]["equilibration_ns"] = {"folded": 2.0, "unfolded": 0.5}
+
+    written: dict[str, str] = {}
+    monkeypatch.setattr(pe, "build_system", lambda *a, **k: tmp_path / "system")
+    monkeypatch.setattr(pe, "gmx_command", lambda cfg: "gmx")
+    monkeypatch.setattr(pe, "_run", lambda *a, **k: "")
+    monkeypatch.setattr(pe, "_run_mdrun_with_gpu_retry", lambda *a, **k: "")
+    monkeypatch.setattr(pe, "assert_resumable", lambda *a, **k: None)
+    monkeypatch.setattr(pe, "ROOT", tmp_path)
+
+    def fake_write(path, body, dry_run=False):
+        written[Path(path).name] = body
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(body)
+        return Path(path)
+    monkeypatch.setattr(pe, "_write_mdp", fake_write)
+
+    # a dhdl with one record per nstdhdl over the FOLDED nsteps, plus t=0
+    f_sched = pe.window_schedule(cfg, "folded")
+    n_records = f_sched["nsteps"] // f_sched["nstdhdl"] + 1
+    monkeypatch.setattr(pe, "dhdl_to_u_kn",
+                        lambda *a, **k: np.zeros((cfg["fep"]["lambda_windows"], n_records)))
+
+    (tmp_path / "results" / "fep" / "A4V" / "folded" / "w0_r0").mkdir(parents=True)
+    (tmp_path / "results" / "fep" / "A4V" / "folded" / "w0_r0" / "em.gro").write_text("x")
+
+    out = pe.run_pmx_window(cfg, "A4V", "folded", 0, 0)
+
+    assert "nsteps                   = 5500000" in written["prod.mdp"], \
+        "folded window did not get the folded sampling length"
+    # discard must match the equilibration THIS leg actually ran, not the other leg's
+    assert out["u_kn_window"].shape[1] == n_records - f_sched["discard"]
+    u_sched = pe.window_schedule(cfg, "unfolded")
+    assert f_sched["discard"] != u_sched["discard"]

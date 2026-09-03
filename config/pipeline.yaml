@@ -156,8 +156,19 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   softcore: true
   estimator: mbar
   temperature_K: 298.15     # reduced potentials -> kcal/mol conversion (kT)
-  ns_per_window: 3          # production time per lambda window
-  equilibration_ns: 0.5
+  # Production time per lambda window. Either a single number (both legs) or a
+  # per-leg mapping. PER-LEG because the two legs have very different problems: across
+  # A4V/G93A/I149A/I18V the unfolded leg reproduces to 0.05-0.23 kcal/mol across
+  # independent boxes with hysteresis never above 0.26, while the folded leg spreads up
+  # to 1.46. A capped tripeptide in water relaxes in tens of ps and has no slow mode to
+  # get stuck in; the folded protein does. Sampling them equally spends ~30% of the
+  # compute where there is no defect.
+  ns_per_window:
+    folded: 3
+    unfolded: 3
+  equilibration_ns:         # discarded before MBAR; buys RELAXATION, not samples
+    folded: 0.5
+    unfolded: 0.5
   # --- real Perses window: integrator / ensemble / alchemy (read by src/fep/window.py) ---
   # Solvation reuses structure.solvent_padding_nm + structure.ion_conc_M (Perses solvates the
   # WT hybrid). Force field reuses structure.ff_protein + structure.water_model.

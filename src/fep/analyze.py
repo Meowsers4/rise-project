@@ -115,25 +115,30 @@ def load_leg_replicate(fep_dir: Path, variant: str, leg: str, rep: int, n_states
 
 
 def collect_provenance(fep_dir: Path, variant: str, legs: list[str], n_reps: int,
-                       n_states: int) -> tuple[set[str], set[str]]:
+                       n_states: int) -> tuple[set[str], dict[str, set[str]]]:
     """Engine tags across every window of ``variant``, read without loading the samples.
 
     Runs before any MBAR work so a provenance problem is reported immediately rather than
     after minutes of computation on numbers that were never going to be usable.
 
     Returns:
-        ``(provenances, protocols)``. Provenance says *which engine*; the protocol
-        fingerprint says *which settings*. Windows can share an engine and still be
-        unmixable -- e.g. half a variant run before ``sc-coul`` was enabled and half
-        after. Returned rather than collected through an out-parameter so a caller
-        cannot drop the protocol set and silently disable the mixing guard.
+        ``(provenances, protocols_by_leg)``. Provenance says *which engine*; the
+        protocol fingerprint says *which settings*. Windows can share an engine and still
+        be unmixable -- e.g. half a variant run before ``sc-coul`` was enabled and half
+        after.
+
+        Protocols are keyed BY LEG because ``fep.ns_per_window`` and
+        ``fep.equilibration_ns`` may legitimately differ between the folded and unfolded
+        legs (the unfolded tripeptide is converged at a third the sampling). Within a leg
+        every window must still agree. Returned rather than filled through an
+        out-parameter so a caller cannot drop it and silently disable the guard.
 
     Raises:
         ValueError: If any window carries no provenance -- which is what a hand-written
             or pre-provenance file looks like, and is never trustworthy.
     """
     provenances: set[str] = set()
-    protocols: set[str] = set()
+    protocols: dict[str, set[str]] = {leg: set() for leg in legs}
     for leg in legs:
         for rep in range(n_reps):
             for w in range(n_states):
@@ -146,8 +151,8 @@ def collect_provenance(fep_dir: Path, variant: str, legs: list[str], n_reps: int
                             "distinguished from a real run; re-run it with src.fep.window."
                         )
                     provenances.add(str(npz["provenance"]))
-                    protocols.add(str(npz["protocol"]) if "protocol" in npz
-                                  else _UNLABELLED_PROTOCOL)
+                    protocols[leg].add(str(npz["protocol"]) if "protocol" in npz
+                                       else _UNLABELLED_PROTOCOL)
     return provenances, protocols
 
 
@@ -271,24 +276,30 @@ def leg_hysteresis_kT(per_window: list[np.ndarray]) -> float:
     return abs(fwd - rev)
 
 
-def _check_single_protocol(variant: str, protocols: set[str]) -> None:
-    """Raise unless every window was produced by the same .mdp settings.
+def _check_single_protocol(variant: str, protocols_by_leg: dict[str, set[str]]) -> None:
+    """Raise unless every window of a LEG was produced by the same .mdp settings.
 
     The engine tag cannot see this: `sc-coul` off vs on, or a changed `nstdhdl`, are the
     same engine producing incompatible samples. Combining them in one MBAR estimate is
     silent and wrong. Windows written before fingerprinting count as their own protocol,
     so a pre-change set still analyses on its own but can never be mixed with a later one.
 
+    Checked PER LEG, not across the variant: ``fep.ns_per_window`` and
+    ``fep.equilibration_ns`` may differ between folded and unfolded, which makes the two
+    legs hash differently by design. Each leg is a separate MBAR estimate, so they never
+    share samples -- only their end results are subtracted.
+
     Raises:
-        ValueError: If the windows disagree on the mdp fingerprint.
+        ValueError: If any leg's windows disagree on the mdp fingerprint.
     """
-    if len(protocols) > 1:
-        raise ValueError(
-            f"{variant}: windows were run under {len(protocols)} different protocols "
-            f"{sorted(protocols)}. A ΔΔG may not mix .mdp settings (sc-coul, nstdhdl, "
-            "sampling length ...) any more than it may mix engines. Re-run the variant "
-            "so every window shares one protocol."
-        )
+    for leg, protocols in sorted(protocols_by_leg.items()):
+        if len(protocols) > 1:
+            raise ValueError(
+                f"{variant}/{leg}: windows were run under {len(protocols)} different "
+                f"protocols {sorted(protocols)}. A leg's ΔG may not mix .mdp settings "
+                "(sc-coul, nstdhdl, sampling length ...) any more than it may mix "
+                "engines. Re-run the leg so every window shares one protocol."
+            )
 
 
 def _check_single_provenance(variant: str, provenances: set[str]) -> None:
@@ -321,7 +332,12 @@ def analyze_variant(cfg: dict, variant: str, out_path: str | Path,
     _check_single_provenance(variant, provenances)
     _check_single_protocol(variant, protocols)
     provenance = provenances.pop()
-    protocol = protocols.pop() if protocols else _UNLABELLED_PROTOCOL
+    # One entry per leg; they may differ by design (per-leg sampling). Recorded as a
+    # single string when the legs agree so the schema is unchanged for the common case.
+    per_leg = {leg: (sorted(ps)[0] if ps else _UNLABELLED_PROTOCOL)
+               for leg, ps in protocols.items()}
+    protocol = (next(iter(set(per_leg.values()))) if len(set(per_leg.values())) == 1
+                else "|".join(f"{leg}={h}" for leg, h in sorted(per_leg.items())))
 
     decorrelate = bool(fcfg.get("decorrelate", True))
     per_rep_ddg, per_rep_stat_var, hysteresis_kcal = [], [], []
