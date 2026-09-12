@@ -170,10 +170,14 @@ Pre-registered 2026-08-07, before any gate evaluation. **Never lower one to make
 
 ## 5. Open questions — decisions, not tasks
 
-1. **Three experimental values are suspect.** F64A (−0.20; two Phe→Ala at equal burial
-   differ by 2.3 kcal/mol, and it breaks the atom-count trend within its own source),
-   G93V (7.00) and G93S (3.70) (the only controls where monomer > dimer, all from
-   Stathopulos 2006). F64A and G93V are the two anchors of the gate's dynamic range.
+1. **Reference-state mismatch — see [`docs/reference_state_audit.md`](docs/reference_state_audit.md)
+   (2026-09-12), which supersedes the "suspect values" framing that stood here.** Every gate
+   control was measured with the **Cys57–Cys146 disulfide intact**; we simulate the reduced
+   (2SH) form. Separately, G93S and G93V are **DSC measurements on the apo dimer**, not
+   apo-monomer as `variants.csv` labels them — which explains the "monomer > dimer" oddity
+   without impugning the measurements. A4V/G93A/I113T re-derive exactly from Lindberg 2005, so
+   the panel arithmetic is sound. F64A's −0.20 has **not** been checked against Nordlund &
+   Oliveberg's primary table (PNAS 403'd); that is the top remaining item.
    **Do not drop a control because it produced an inconvenient FEP number** — that is the
    same category of post-hoc adjustment as lowering `min_pearson`. Check the primary
    sources first, and write the argument down before any gate evaluation.

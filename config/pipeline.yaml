@@ -46,7 +46,14 @@ structure:
 
 panel:
   csv: data/variants.csv                            # Stage 0 output (source of truth)
-  controls_csv: data/sod1_controls_apo_monomer.csv  # verified apo-monomer controls (Kumar2017 Table S1)
+  controls_csv: data/sod1_controls_apo_monomer.csv
+                            # Controls compiled by Kumar 2017 Table S1 (Sci Rep 7:4678). NOT
+                            # "verified apo-monomer" -- that comment was wrong and was removed
+                            # 2026-09-12. Kumar is a COMPILATION with no stated conditions; the
+                            # upstream measurements are apo but disulfide-INTACT (we simulate
+                            # 2SH), and the G93S/G93V rows are DSC on the apo dimer, not the
+                            # monomer. See docs/reference_state_audit.md before treating any of
+                            # these as a like-for-like reference.
   uncharacterized_csv: data/uncharacterized_variants.csv  # Route B input (variant,bucket,clinvar_id)
   target_size: 40           # v1 panel size (README suggests 30-50)
   min_positive_controls: 10 # gate power depends on control count+spread (D3); quality over count

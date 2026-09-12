@@ -8,10 +8,20 @@ verified against PubMed/PMC on 2026-08-01.
 - **Abstract-only** — verified record exists, but I could NOT confirm a free full text. Check
   Google Scholar / Europe PMC / your SCC library proxy before relying on it.
 
-> ⚠️ **Unverified source:** `data/variants.csv` cites `Kumar2017_TableS1` as a control source
-> for many apo-monomer ΔΔG values. I could not locate a "Kumar 2017" SOD1-stability paper on
-> PubMed. **Confirm this citation before publishing anything that rests on it.** The Lindberg
-> 2005 and Nordlund/Oliveberg 2006 entries below are confirmed and carry the same numbers.
+> ✅ **Resolved 2026-09-12 — the earlier warning here was wrong.** This file previously said
+> `Kumar2017_TableS1` could not be found on PubMed. **It exists:** Kumar V, Rahman S, Choudhry
+> H, Zamzami MA, Jamal MS, Islam A, Ahmad F, Hassan MI (2017), *Computing disease-linked SOD1
+> mutations: deciphering protein stability and patient-phenotype relations*, Sci Rep 7:4678,
+> DOI [10.1038/s41598-017-04950-9](https://doi.org/10.1038/s41598-017-04950-9), free at
+> [PMC5498623](https://pmc.ncbi.nlm.nih.gov/articles/PMC5498623/). `README.md` carried the
+> correct DOI the whole time and the two files were never reconciled.
+>
+> ⚠️ **But it is a compilation, not a measurement**, and that is the real caveat: 54 apo-monomer
+> ΔΔG values taken from Vassall, Nordlund & Oliveberg, Lindberg, Stathopulos and Byström, with
+> **no experimental conditions stated** and a single blanket "~0.3 kcal/mol" methodological
+> error — which is where every `exp_ddg_err: 0.3` in `variants.csv` comes from. The controls it
+> compiles were measured with the **Cys57–Cys146 disulfide intact**, while this project
+> simulates the reduced form. See [`docs/reference_state_audit.md`](docs/reference_state_audit.md).
 
 ---
 
@@ -142,7 +152,7 @@ sources are above:
 
 | `exp_source` tag in variants.csv | Citation | Status |
 |---|---|---|
-| `Kumar2017_TableS1` | **UNVERIFIED — not found on PubMed** | ⚠️ confirm |
+| `Kumar2017_TableS1` | Kumar et al. 2017, Sci Rep 7:4678 ([PMC5498623](https://pmc.ncbi.nlm.nih.gov/articles/PMC5498623/)) | confirmed 2026-09-12 — but a **compilation**, conditions not stated |
 | `Lindberg2005_PNAS_102_9754` | Lindberg et al. 2005, PNAS (entry 2) | confirmed |
 | `NordlundOliveberg2006_PNAS_103_10218` | Nordlund & Oliveberg 2006, PNAS (entry 3) | confirmed |
 
