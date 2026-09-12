@@ -97,15 +97,39 @@ echo "$(date +%H:%M) | done: $(find results/fep/$V -name 'w*_r*.npz' | wc -l)/12
 
 ```bash
 source scripts/scc_env.sh
-python -c '
-import numpy as np, glob, sys
-fs = glob.glob(f"results/fep/{sys.argv[1]}/*/w*_r*.npz")
-print(len(fs), {np.load(f)["u_kn_window"].shape for f in fs}, {str(np.load(f)["protocol"]) for f in fs})' A4V
-python -m src.fep.analyze --variant A4V --config config/pipeline.yaml --out results/fep/A4V/ddg.json
+V=A4V
+python - "$V" <<'EOF'
+import glob, sys, numpy as np
+for leg in ("folded", "unfolded"):
+    fs = glob.glob(f"results/fep/{sys.argv[1]}/{leg}/w*_r*.npz")
+    print(leg, len(fs),
+          {np.load(f)["u_kn_window"].shape for f in fs},
+          {str(np.load(f)["protocol"]) for f in fs})
+EOF
+python -m src.fep.analyze --variant "$V" --config config/pipeline.yaml --out results/fep/"$V"/ddg.json
 ```
 
-**Always run that first line.** Want `120`, `{(20, 3001)}`, one protocol hash. A run that
-silently produced empty windows once got as far as a confident-looking analysis crash.
+**Always run that first block, and read it PER LEG.** Want 60 windows, one shape and one
+protocol hash *within* each leg. A run that silently produced empty windows once got as far
+as a confident-looking analysis crash.
+
+The two legs may legitimately differ, and under the current config they do --
+`ns_per_window` and `equilibration_ns` are per-leg, so folded and unfolded hash differently
+by design and `analyze` records the pair as `folded=...|unfolded=...`.
+[`_check_single_protocol`](src/fep/analyze.py#L279) enforces one protocol per leg, not per
+variant. Expected shapes follow from `fep.frames_per_window` and the leg's sampling:
+
+| leg | ns / equil | nstdhdl | records | discarded | kept |
+|---|---|---|---|---|---|
+| folded | 9.0 / 2.0 | 1500 | 3667 | 667 | **(20, 3000)** |
+| unfolded | 3.0 / 0.5 | 500 | 3501 | 500 | **(20, 3001)** |
+
+Everything run before `7db3095` is `(20, 3001)` on both legs at hash `822108e9db71124d`.
+Inventory of what is on disk:
+[`docs/raw_result_reconciliation.md`](docs/raw_result_reconciliation.md).
+
+**Reconciling an archived result: do not write to `results/fep/<V>/ddg.json`.** That
+overwrites the record you are checking against. Send `--out` somewhere else and diff.
 
 ### When at least 6 have converged
 
