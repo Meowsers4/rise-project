@@ -8,10 +8,11 @@ four-week recommendation is conditioned on:
 
 **Verdict: the stop rule passes. The four-week plan stands.** Every documented ΔΔG, cycle
 closure, per-leg ΔG, hysteresis and overlap re-derives from the archived NPZ windows to
-floating-point rounding (Δ ≤ 1.2e-12 across all eight variants, worst case
-`I18V per_replicate_ddg`; ≤ 3.1e-15 on every F64A field). The review's finding that "every
-reported SOD1 result in this repo is documentation arithmetic, not a reproduced MBAR estimate"
-is now discharged.
+floating-point rounding, in **two independent local Python stacks** (§1): Δ ≤ 1.2e-12 across
+all eight variants, worst case `I18V per_replicate_ddg`, and ≤ 5.4e-15 on every F64A field
+(3.1e-15 on the per-leg estimates tabulated in §3). The review's finding that "every reported
+SOD1 result in this repo is documentation arithmetic, not a reproduced MBAR estimate" is now
+discharged.
 
 **One documented claim is false and is corrected below** (§5): F64A folded r1's hysteresis is
 *not* the lowest recorded anywhere in the project. The finding it was cited for survives, and
@@ -24,9 +25,11 @@ is now quantified across 48 records instead of one (§6).
 | Input | `~/sod1fep_archive_2026-09-11/fep/` — 8 variants × 2 legs × 20 λ × 3 replicates = 960 windows |
 | Code | `src.fep.analyze.analyze_variant` at `024114b`, unmodified |
 | Config | `config/pipeline.yaml` at `024114b`, unmodified |
-| Machine | local Mac, throwaway venv on Python **3.12.13**, numpy 2.5.3, scipy 1.18.1, pymbar 4.0.3 **without JAX**. Not the `rise` conda env (3.13.9 / numpy 2.5.0 / scipy 1.18.0) — a rerun there would be a second independent environment, and should be recorded as an additional row rather than replacing this one. |
+| Machine (a) | local Mac, throwaway venv on Python **3.12.13**, numpy 2.5.3, scipy 1.18.1, pymbar 4.0.3 |
+| Machine (b) | same Mac, conda env `rise`: Python **3.13.9**, numpy 2.5.0, scipy 1.18.0, pymbar 4.0.3. Run 2026-09-12 as an independent check; all eight variants agree with (a) to ≤ 1.3e-12 and with the SCC records to ≤ 1.1e-12. |
+| pymbar backend | **Neither local env has JAX**; the SCC runs did. The JAX/non-JAX comparison is therefore carried entirely by the diff against the run-time records, not by (a) vs (b). |
 | Compare against | the run-time `results/convergence/<V>.json` written by the original SCC runs (Python 3.11, JAX backend), pulled 2026-09-12 |
-| Output | `~/sod1fep_archive_2026-09-11/reanalysis_2026-09-12/` |
+| Output | `~/sod1fep_archive_2026-09-11/reanalysis_2026-09-12/` — (a) at the top level, (b) under `rise_py313/` |
 | Test suite | 105 passed, 12 skipped (skips need OpenMM) — the documented baseline |
 
 ### Why the current config is provenance-consistent with runs from 2026-08-30
@@ -89,7 +92,7 @@ The stop rule's actual subject. Recorded 2026-08-30 on the SCC; re-derived 2026-
 | unfolded r1 | −5.1159 | **−5.1159** | 0.1258 | **0.1258** | 0.0881 | 11655 |
 | unfolded r2 | −5.2476 | **−5.2476** | 0.1918 | **0.1918** | 0.0291 | 12432 |
 
-Largest disagreement on any field in this table: **3.1e-15**; over F64A's top-level scalars it is 1.8e-15 (`replicate_spread_kcal`). Independent-sample counts are identical
+Largest disagreement on any field in this table: **3.1e-15**, identical under both local environments; over F64A's top-level scalars it is 1.8e-15 (`replicate_spread_kcal`), and 5.4e-15 across the full 20×20 overlap matrices. Independent-sample counts are identical
 (60,617 of 360,120), so `pymbar.timeseries` made the same decorrelation decisions on both
 machines.
 
@@ -98,6 +101,9 @@ machines.
 - folded r1 hysteresis **0.0227** — the lowest of F64A's three folded replicates and of all six F64A records
 - folded r1 ΔG **+2.5059** vs siblings +1.2496 / +1.3572 (mean +1.3034)
 - disagreement **+1.2026 kcal/mol**
+
+All three figures are bit-identical under both local environments (§1 (a) and (b)), so the
+stop-rule example does not depend on a particular numpy/scipy build.
 
 ## 4. Gate arithmetic, recomputed from re-derived values
 
