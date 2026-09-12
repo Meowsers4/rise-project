@@ -5,6 +5,12 @@ Written for an agent with **no prior context**. Updated 2026-08-30.
 Read `README.md` for the scientific design and `CLAUDE.md` for the operating rules. This
 file is only: where things stand, what to do next, and what not to break.
 
+> **Read [`docs/post_pivot_review.md`](docs/post_pivot_review.md) first (2026-09-11).** An
+> external review corrects several claims in this file — the protocol hash is now per-leg,
+> the ~23 GPU-h/variant figure does not reconcile with window timings, and the F64A
+> uncertainty argument in §7 does not hold as stated. It also recommends against gate
+> attempt 2. Nothing below has been edited pending the user's decision.
+
 ---
 
 ## 1. Orientation in sixty seconds
