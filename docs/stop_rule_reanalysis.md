@@ -8,8 +8,10 @@ four-week recommendation is conditioned on:
 
 **Verdict: the stop rule passes. The four-week plan stands.** Every documented ΔΔG, cycle
 closure, per-leg ΔG, hysteresis and overlap re-derives from the archived NPZ windows to
-floating-point rounding (Δ ≤ 2e-15). The review's finding that "every reported SOD1 result in
-this repo is documentation arithmetic, not a reproduced MBAR estimate" is now discharged.
+floating-point rounding (Δ ≤ 1.2e-12 across all eight variants, worst case
+`I18V per_replicate_ddg`; ≤ 3.1e-15 on every F64A field). The review's finding that "every
+reported SOD1 result in this repo is documentation arithmetic, not a reproduced MBAR estimate"
+is now discharged.
 
 **One documented claim is false and is corrected below** (§5): F64A folded r1's hysteresis is
 *not* the lowest recorded anywhere in the project. The finding it was cited for survives, and
@@ -22,18 +24,24 @@ is now quantified across 48 records instead of one (§6).
 | Input | `~/sod1fep_archive_2026-09-11/fep/` — 8 variants × 2 legs × 20 λ × 3 replicates = 960 windows |
 | Code | `src.fep.analyze.analyze_variant` at `024114b`, unmodified |
 | Config | `config/pipeline.yaml` at `024114b`, unmodified |
-| Machine | local Mac, Python 3.12.x, numpy 2.5.3, scipy 1.18.1, pymbar 4.0.3 **without JAX** |
+| Machine | local Mac, throwaway venv on Python **3.12.13**, numpy 2.5.3, scipy 1.18.1, pymbar 4.0.3 **without JAX**. Not the `rise` conda env (3.13.9 / numpy 2.5.0 / scipy 1.18.0) — a rerun there would be a second independent environment, and should be recorded as an additional row rather than replacing this one. |
 | Compare against | the run-time `results/convergence/<V>.json` written by the original SCC runs (Python 3.11, JAX backend), pulled 2026-09-12 |
 | Output | `~/sod1fep_archive_2026-09-11/reanalysis_2026-09-12/` |
 | Test suite | 105 passed, 12 skipped (skips need OpenMM) — the documented baseline |
 
 ### Why the current config is provenance-consistent with runs from 2026-08-30
 
-`analyze_variant` reads only `lambda_windows`, `replicates`, `legs`, `temperature_K`,
-`convergence.max_cycle_closure_kcal` and `decorrelate`. It does **not** read `ns_per_window`,
-`equilibration_ns` or `lambda_vector` — those shape the windows, and the windows already exist.
-`git log -S` on each of those six keys returns nothing since before the F64A run, and
-`max_cycle_closure_kcal` has been 1.0 since the initial scaffold.
+`analyze_variant` reads six config values — `lambda_windows`, `replicates`, `legs`,
+`temperature_K`, `convergence.max_cycle_closure_kcal` and `decorrelate`. (`fep.framework` is
+checked too, but by [`main()`](../src/fep/analyze.py#L433) and `validate.py`, not by
+`analyze_variant`.) It does **not** read `ns_per_window`, `equilibration_ns` or
+`lambda_vector` — those shape the windows, and the windows already exist.
+
+All six are unchanged since before the F64A run; `legs:` has not changed since the initial
+scaffold `a043270`, and `max_cycle_closure_kcal` has been 1.0 since the same commit. Note that
+`git log -S legs` flags `927b302` and `7db3095`, but **both are false positives** — each merely
+added a comment containing the word "legs" (`legs*windows*replicates`, "both legs"); the `legs:`
+key itself is untouched, as `git log -L '/^  legs:/,+5'` confirms.
 
 The only change to `analyze.py` since F64A ran (`7db3095`) converts the protocol check from
 per-variant to per-leg. It touches provenance bookkeeping and no numerics. So the code path
@@ -81,7 +89,7 @@ The stop rule's actual subject. Recorded 2026-08-30 on the SCC; re-derived 2026-
 | unfolded r1 | −5.1159 | **−5.1159** | 0.1258 | **0.1258** | 0.0881 | 11655 |
 | unfolded r2 | −5.2476 | **−5.2476** | 0.1918 | **0.1918** | 0.0291 | 12432 |
 
-Largest disagreement on any field: **8.9e-16**. Independent-sample counts are identical
+Largest disagreement on any field in this table: **3.1e-15**; over F64A's top-level scalars it is 1.8e-15 (`replicate_spread_kcal`). Independent-sample counts are identical
 (60,617 of 360,120), so `pymbar.timeseries` made the same decorrelation decisions on both
 machines.
 
