@@ -8,11 +8,11 @@ four-week recommendation is conditioned on:
 
 **Verdict: the stop rule passes. The four-week plan stands.** Every documented ΔΔG, cycle
 closure, per-leg ΔG, hysteresis and overlap re-derives from the archived NPZ windows to
-floating-point rounding, in **two independent local Python stacks** (§1): Δ ≤ 1.2e-12 across
-all eight variants, worst case `I18V per_replicate_ddg`, and ≤ 5.4e-15 on every F64A field
-(3.1e-15 on the per-leg estimates tabulated in §3). The review's finding that "every reported
-SOD1 result in this repo is documentation arithmetic, not a reproduced MBAR estimate" is now
-discharged.
+floating-point rounding, in **three independent local environments spanning both pymbar
+backends** (§1): Δ ≤ 3.1e-12 against the SCC records across all eight variants (≤ 3.2e-12 for
+any pairwise comparison), and ≤ 5.7e-15 on every F64A field (3.1e-15 on the per-leg estimates
+tabulated in §3). The review's finding that "every reported SOD1 result in this repo is
+documentation arithmetic, not a reproduced MBAR estimate" is now discharged.
 
 **One documented claim is false and is corrected below** (§5): F64A folded r1's hysteresis is
 *not* the lowest recorded anywhere in the project. The finding it was cited for survives, and
@@ -26,10 +26,11 @@ is now quantified across 48 records instead of one (§6).
 | Code | `src.fep.analyze.analyze_variant` at `024114b`, unmodified |
 | Config | `config/pipeline.yaml` at `024114b`, unmodified |
 | Machine (a) | local Mac, throwaway venv on Python **3.12.13**, numpy 2.5.3, scipy 1.18.1, pymbar 4.0.3 |
-| Machine (b) | same Mac, conda env `rise`: Python **3.13.9**, numpy 2.5.0, scipy 1.18.0, pymbar 4.0.3. Run 2026-09-12 as an independent check; all eight variants agree with (a) to ≤ 1.3e-12 and with the SCC records to ≤ 1.1e-12. |
-| pymbar backend | **Neither local env has JAX**; the SCC runs did. The JAX/non-JAX comparison is therefore carried entirely by the diff against the run-time records, not by (a) vs (b). |
+| Machine (b) | same Mac, conda env `rise`: Python **3.13.9**, numpy 2.5.0, scipy 1.18.0, pymbar 4.0.3, no JAX. Agrees with (a) to ≤ 1.3e-12 and with the SCC records to ≤ 1.1e-12. |
+| Machine (c) | same Mac, venv identical to (a) but **with JAX 0.11.1** (pymbar's 64-bit JAX backend, as the SCC used). Isolates the backend: (a) and (c) differ in nothing else. Agrees with the SCC records to ≤ 3.1e-12. |
+| pymbar backend | Both backends exercised. (a) and (b) are numpy/scipy; (c) is JAX, matching the SCC. See §2.1 — matching the backend did **not** reduce the residual. |
 | Compare against | the run-time `results/convergence/<V>.json` written by the original SCC runs (Python 3.11, JAX backend), pulled 2026-09-12 |
-| Output | `~/sod1fep_archive_2026-09-11/reanalysis_2026-09-12/` — (a) at the top level, (b) under `rise_py313/` |
+| Output | `~/sod1fep_archive_2026-09-11/reanalysis_2026-09-12/` — (a) top level, (b) `rise_py313/`, (c) `jax_py312/` |
 | Test suite | 105 passed, 12 skipped (skips need OpenMM) — the documented baseline |
 
 ### Why the current config is provenance-consistent with runs from 2026-08-30
@@ -75,6 +76,34 @@ wrote — full per-leg detail (folded −13.412/−12.964/−11.952, unfolded �
 but not re-derivable. That is the cost recorded in `raw_result_reconciliation.md` §"What was
 lost", and it is now the single weakest link in the chain of custody.
 
+### 2.1 The residual is solver noise, not a backend difference
+
+Running (c) with JAX — the same backend the SCC used, in an environment otherwise identical to
+(a) — was expected to tighten the agreement. It did the opposite:
+
+| comparison | worst Δ | where |
+|---|---|---|
+| (c) JAX vs SCC — **same backend** | **3.034e-12** | `I18V per_replicate_ddg[2]` |
+| (a) non-JAX vs SCC | 1.158e-12 | `I18V per_replicate_ddg[2]` |
+| (b) non-JAX vs SCC | 1.024e-12 | `I113T` overlap element |
+| (c) vs (a) — **backend isolated** | 1.876e-12 | `I18V per_replicate_ddg[2]` |
+
+So the ~1e-12 residual is **not** attributable to the backend: matching it exactly does not
+remove the disagreement, and the same field dominates every comparison. It is accumulated
+floating-point noise in the MBAR solve and the subsequent summation. `I18V per_replicate_ddg[2]`
+is the worst field in five of six comparisons, which is what one would expect of the
+smallest-ΔΔG variant in the set (0.83 kcal/mol) rather than of a systematic backend effect.
+
+This is a decomposition, not a strengthening: the headline bound is set by the noisiest
+comparison and therefore *rose* from 1.2e-12 to 3.1e-12 when (c) was added. Recorded that way
+deliberately — the looser number is the honest one, and 3e-12 kcal/mol remains ~12 orders of
+magnitude below anything the project reports.
+
+One incidental check: pymbar's JAX 64-bit banner is emitted on stderr and
+[`_solver_notes`](../src/fep/analyze.py#L157) is supposed to strip it. Under (c) the F64A
+`solver_notes` came back `[]`, matching the SCC record exactly — the first time that stripping
+has been exercised against genuine JAX output rather than against the SCC's saved result.
+
 A4V under 9 ns folded also carries two protocol hashes by design —
 `folded=cf1e632168579261|unfolded=822108e9db71124d` — and `_check_single_protocol` accepted it
 per leg, as intended.
@@ -102,8 +131,8 @@ machines.
 - folded r1 ΔG **+2.5059** vs siblings +1.2496 / +1.3572 (mean +1.3034)
 - disagreement **+1.2026 kcal/mol**
 
-All three figures are bit-identical under both local environments (§1 (a) and (b)), so the
-stop-rule example does not depend on a particular numpy/scipy build.
+All three figures are bit-identical under all three local environments (§1 (a), (b), (c)), so
+the stop-rule example depends on neither the numpy/scipy build nor the pymbar backend.
 
 ## 4. Gate arithmetic, recomputed from re-derived values
 
