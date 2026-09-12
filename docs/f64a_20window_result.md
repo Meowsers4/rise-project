@@ -52,10 +52,18 @@ sampling time, not spacing.
 | **r1** | **+2.51** | **0.02** |
 | r2 | +1.36 | 1.10 |
 
-r1 has **the lowest hysteresis recorded anywhere in this project** — and it is the
+r1 has the **lowest hysteresis of F64A's six leg-replicate records** — and it is the
 replicate that disagrees with the other two by ~1.2 kcal/mol. With independent boxes, each
 replicate settled into its own basin and sampled that basin consistently. Cycle closure
 measures *within-basin* self-consistency; it cannot see that the basins differ.
+
+> **Correction (2026-09-12).** This line originally read "the lowest hysteresis recorded
+> anywhere in this project". Ranking all 48 records in the archive puts it **10th**; G93A
+> unfolded r2 (0.0017) is 13x lower, and two G93S *folded* records are lower too. What is
+> extremal is the *disagreement*: 1.2026 kcal/mol is the largest of the 48. Over all 48,
+> folded-leg hysteresis and independent-box disagreement are near-uncorrelated (Pearson
+> +0.072, n=24), so the paragraph below understates the case rather than overstating it.
+> See [`stop_rule_reanalysis.md`](stop_rule_reanalysis.md) §5-6.
 
 This is a single-variant demonstration of what G93A only suggested across variants (closure
 0.08, still 1.05 kcal/mol wrong). It is the sharpest available statement of the C2 claim:

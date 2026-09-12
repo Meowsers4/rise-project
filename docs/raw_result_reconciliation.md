@@ -4,10 +4,13 @@ Week-1 step 1 of the plan in [`post_pivot_review.md`](post_pivot_review.md): est
 the raw windows behind every documented result still exist, are internally consistent, and
 are preserved outside the live run directories.
 
-**This records structural integrity only.** It does not verify a single ΔΔG. Re-deriving
-the estimates from these windows is the next step, and until that is done the review's
-finding stands: every reported SOD1 result in this repo is documentation arithmetic, not a
-reproduced MBAR estimate.
+**This records structural integrity only.** It does not verify a single ΔΔG.
+
+> **Superseded in part, 2026-09-12.** That re-derivation has since been done — see
+> [`stop_rule_reanalysis.md`](stop_rule_reanalysis.md). Every documented estimate except
+> A4V's gate point now reproduces from these windows to floating-point rounding, so the
+> review's "documentation arithmetic, not a reproduced MBAR estimate" finding no longer
+> stands. The structural manifest below is unchanged and still current.
 
 ## Archive
 
@@ -16,7 +19,8 @@ reproduced MBAR estimate.
 | Cluster | `/projectnb/rise-batteries/bode/archive_2026-09-11/` — 7 variants, ~6.6 GB |
 | Off-cluster | `~/sod1fep_archive_2026-09-11/fep/` on the local Mac |
 | Verified by | `rsync -an --itemize-changes --exclude A4V results/fep/ <archive>/` → empty output (byte-for-byte complete) |
-| Not yet archived | **A4V** — array still in flight on 2026-09-11; add to both copies once it lands |
+| A4V, 2026-09-12 | Landed and pulled to the **local Mac** — `fep/A4V` now 60/60 on both legs, plus `convergence/` (8 files) and `archive/` (the 3 ns A4V records + `F64A_f9bded6f07b4abe5`). |
+| Still to do on the cluster | Copy A4V into `/projectnb/rise-batteries/bode/archive_2026-09-11/`. The off-cluster copy is currently the only archived one, so A4V is back to single-copy on the SCC side. |
 
 `results/` is gitignored, so before today every raw window in the project existed in exactly
 one place. A4V demonstrated the cost of that: see "What was lost" below.
@@ -28,7 +32,7 @@ walking `results/fep/<variant>/<leg>/w*_r*.npz`.
 
 | variant | leg | n | shape | protocol | provenance |
 |---|---|---|---|---|---|
-| A4V | folded | **52/60** | (20, 3000) | `cf1e632168579261` | gromacs_pmx |
+| A4V | folded | ~~52~~ **60/60** (2026-09-12) | (20, 3000) | `cf1e632168579261` | gromacs_pmx |
 | A4V | unfolded | 60 | (20, 3001) | `822108e9db71124d` | gromacs_pmx |
 | F64A | folded | 60 | (20, 3001) | `822108e9db71124d` | gromacs_pmx |
 | F64A | unfolded | 60 | (20, 3001) | `822108e9db71124d` | gromacs_pmx |
@@ -109,6 +113,7 @@ Not established — and not addressable by this inventory:
 
 ## Next
 
-1. Re-run `src.fep.analyze` per variant against these archived windows under the config each was run with, and diff against the values recorded in `gate_attempt_1.md`.
-2. Recalculate F64A's per-leg estimates, per-replicate hysteresis and replicate SEM — the stop-rule test.
-3. Add A4V to both archives when its array completes.
+1. ~~Re-run `src.fep.analyze` per variant against these archived windows~~ — **done 2026-09-12**, everything reproduces to floating-point rounding: [`stop_rule_reanalysis.md`](stop_rule_reanalysis.md) §2, §4.
+2. ~~Recalculate F64A's per-leg estimates, per-replicate hysteresis and replicate SEM~~ — **done; the stop rule passes**: [`stop_rule_reanalysis.md`](stop_rule_reanalysis.md) §3.
+3. ~~Add A4V to both archives~~ — **done 2026-09-12.** Its gate-attempt-1 point survives only as a run-time JSON record, as predicted above.
+4. `docs/reference_state_audit.md` — the remaining week-1 deliverable. Reanalysis cannot reach it: re-deriving an estimate from saved reduced potentials cannot detect a wrong topology, redox state, mapping or reference construct.

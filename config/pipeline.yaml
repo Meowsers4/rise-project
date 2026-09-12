@@ -164,7 +164,7 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   # get stuck in; the folded protein does. Sampling them equally spends ~30% of the
   # compute where there is no defect.
   ns_per_window:
-    folded: 9             # TRIPLED 2026-09-03 after the gate failed at r=0.407.
+    folded: 9             # TRIPLED 2026-09-03 after the gate failed at r=0.326.
     unfolded: 3           # Unfolded left alone -- it is already converged.
   equilibration_ns:         # discarded before MBAR; buys RELAXATION, not samples
     folded: 2.0           # raised with production: the diagnosis is that the folded leg

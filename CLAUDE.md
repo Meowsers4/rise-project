@@ -160,11 +160,27 @@ thermodynamic cycle. It measures whether a replicate sampled its own basin consi
 it cannot see that the basin is the wrong one. Three results establish this, and they are
 the project's sharpest scientific content (claim C2):
 
-- G93A reports the cleanest closure in the project (0.08) and is 1.05 kcal/mol wrong.
-- F64A's folded r1 has hysteresis **0.02**, the lowest recorded anywhere, and is the
-  replicate that disagrees with its two siblings by 1.2 kcal/mol.
-- G93A's minimum adjacent overlap (0.017) is indistinguishable from F64A's (0.018), yet
-  G93A passes every convergence criterion and F64A fails.
+- G93A reports the cleanest closure in the project (**0.045**) and is **1.17 kcal/mol**
+  wrong (1.259 vs exp 2.43).
+- F64A's folded r1 has hysteresis **0.023** and is the replicate that disagrees with its
+  two independently-solvated siblings by **1.20 kcal/mol** — the largest replicate
+  disagreement of the 48 (variant, leg, replicate) records in the archive, at a hysteresis
+  in the lowest quintile (rank 10/48). It is NOT "the lowest hysteresis recorded anywhere":
+  that claim stood in three files until 2026-09-12 and is false (G93A unfolded r2 is 0.0017,
+  13x lower). Over all 48 records, folded-leg hysteresis and independent-box disagreement are
+  near-uncorrelated (Pearson +0.072, Spearman +0.080, n=24) —
+  `docs/stop_rule_reanalysis.md` §6, which is the measured version of this bullet.
+- G93A's minimum adjacent overlap (**0.025**) is the same order as F64A's (**0.015**), yet
+  G93A passes every convergence criterion and F64A fails. Neither is the project's thinnest
+  ladder: I18V is 0.0054 and I149A 0.0096, and both pass. Overlap does not order the
+  failures either.
+
+All three bullets were previously quoted from the **superseded 18-window** protocol
+(`f9bded6f07b4abe5`: closure 0.08, overlaps 0.017/0.018, error 1.05) while describing the
+20-window gate dataset. Corrected 2026-09-12 against values re-derived from the archived
+windows — `docs/stop_rule_reanalysis.md`. The qualitative claim is unchanged; check the
+protocol before quoting a number from `docs/postfix_18window_results.md` or
+`docs/f64a_folded_leg_failure.md`, which describe earlier ladders.
 
 Consequences for day-to-day work: never report `converged: true` as evidence a number is
 right; read `min_adjacent_overlap` and `replicate_spread_kcal` alongside it. Since

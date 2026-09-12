@@ -5,7 +5,13 @@ Written for an agent with **no prior context**. Updated 2026-08-30.
 Read `README.md` for the scientific design and `CLAUDE.md` for the operating rules. This
 file is only: where things stand, what to do next, and what not to break.
 
-> **Read [`docs/post_pivot_review.md`](docs/post_pivot_review.md) first (2026-09-11).** An
+> **Read [`docs/stop_rule_reanalysis.md`](docs/stop_rule_reanalysis.md) first (2026-09-12).**
+> Every documented estimate below has now been re-derived from the raw archived windows and
+> reproduces to floating-point rounding, so the review's "unverified against raw output"
+> caveat is discharged — with one exception (A4V's gate point) and one correction (the F64A
+> "lowest hysteresis anywhere" claim is false; see §7 below).
+>
+> **Then [`docs/post_pivot_review.md`](docs/post_pivot_review.md) (2026-09-11).** An
 > external review corrects several claims in this file — the protocol hash is now per-leg,
 > the ~23 GPU-h/variant figure does not reconcile with window timings, and the F64A
 > uncertainty argument in §7 does not hold as stated. It also recommends against gate
@@ -211,10 +217,17 @@ converged.** Unfolded legs reproduce to 0.05–0.24 kcal/mol with low hysteresis
 variant; every problem lives in the folded leg.
 
 The sharpest result is not a ΔΔG. It is that **cycle closure cannot distinguish a converged
-calculation from a wrong one** — F64A's best-behaved replicate (hysteresis 0.02, the lowest
-recorded anywhere in the project) is the one that disagrees with its siblings by 1.2
-kcal/mol. That is a direct, checkable statement about the limitation Wells 2021 named and
-could not resolve, and it is publishable whether or not the gate passes.
+calculation from a wrong one** — F64A's best-behaved replicate (hysteresis 0.023, lowest
+quintile of the archive at rank 10/48) is the one that disagrees with its siblings by 1.20
+kcal/mol, the largest such disagreement in the dataset. Over all 48 (variant, leg, replicate)
+records, folded-leg hysteresis barely tracks independent-box disagreement at all (Pearson
++0.072, n=24). Re-derived from raw windows 2026-09-12:
+[`docs/stop_rule_reanalysis.md`](docs/stop_rule_reanalysis.md).
+
+It was previously written here that r1's hysteresis was "the lowest recorded anywhere in the
+project". **That is false** — it is 10th of 48 — and the correction is the reason §6 of that
+document exists. Note also the review's caution: two agreeing replicates are not ground truth,
+so this shows the diagnostic is uninformative, not which replicate is right.
 
 If the gate fails, README §10 pre-commits the project to a methods/sampling-limits result
 rather than a retune. That is a real outcome, not a fallback.
