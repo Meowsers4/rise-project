@@ -89,6 +89,23 @@ guard and be resumed under the SS config. This is precisely the 2026-08-11 G93A 
 guard's own docstring describes, and the guard is blind to it here. *Mitigation: same as trap 1
 — no stale run dir may exist. This is why the tree is moved, not merged.*
 
+**4. `structure.disulfide` must stay `reduced` — do not "fix" it.** This is the most
+counter-intuitive part of the design and the one most likely to be broken by a well-meaning
+edit. `prepare_variant` **hard-raises** unless `structure.form == "apo"` and
+`structure.disulfide == "reduced"` ([build.py:187](../src/prep/build.py#L187)), so setting it to
+`oxidized` does not produce the SS state — it aborts the build.
+
+The SS state is produced by a different route entirely. Stage 1 calls `strip_disulfide_bonds`,
+which removes the SG–SG **bond from the OpenMM topology only** and does not touch coordinates
+([build.py:117](../src/prep/build.py#L117)) — the two SG atoms stay at their crystal separation
+of ~2 Å. pdb2gmx then re-detects disulfides **by SG–SG distance**, and with the `-ss` answers
+suppressed (`keep_disulfide_reduced: false` → `_pdb2gmx_stdin` returns `""`) it re-forms
+C57–C146 on its own. The SS arm is therefore the *inverse of the guard*: it works by declining
+to answer a prompt, not by declaring an oxidized state anywhere in config.
+
+Consequence: `structure.disulfide: reduced` remains correct and unchanged throughout this
+experiment, and the only config key touching redox is `fep.keep_disulfide_reduced`.
+
 **3. Sampling must be reverted too, or it confounds.** The committed config is 9 ns / 2.0 ns
 folded. Running at 9 ns would vary disulfide **and** sampling simultaneously and break
 comparability with the 1.17 baseline. Three config values change, not one.
@@ -110,22 +127,44 @@ mv results/fep/G93A results/fep/G93A_2SH_baseline
 find results/fep/G93A_2SH_baseline -name 'w*_r*.npz' | wc -l    # expect 120
 ls results/fep/G93A 2>/dev/null && echo "STOP: G93A still present" || echo "clean"
 
-# ---- 2. the three config values ------------------------------------------------
+# ---- 2. the three config values, ON A BRANCH THAT IS NEVER MERGED ---------------
 #   fep.keep_disulfide_reduced : true -> false
 #   fep.ns_per_window.folded   : 9    -> 3
 #   fep.equilibration_ns.folded: 2.0  -> 0.5
-# Do NOT hand-edit on the SCC (CLAUDE.md). Commit locally, push, pull here.
+#   fep.structure.disulfide    : UNCHANGED ("reduced") -- see trap 4
+#
+# CRITICAL: these must NOT land on main. If they do, every later array -- including the
+# week-2/3 F64A and G93V runs -- silently executes SS at 3 ns. Use a throwaway branch:
+#   (locally)  git checkout -b diag/g93a-ss && <edit> && git commit && git push -u origin diag/g93a-ss
+#   (here)     git fetch && git checkout diag/g93a-ss
+# Never merge it. After the run: git checkout main  (step 7).
+# Do NOT hand-edit config on the SCC (CLAUDE.md).
+git branch --show-current      # MUST print diag/g93a-ss before submitting
 
 # ---- 3. smoke test FIRST: the SS path has never run end-to-end ------------------
-# One window, checks pdb2gmx actually forms the bond before spending the array.
-qsub -t 1-120 -tc 1 -v VARIANT=G93A,FEP_MOCK=1 scripts/submit_array.sh   # scheduler shake-out
-# then one real window interactively:
+# The system build is what is being tested (does pdb2gmx form the bond?), and that runs
+# before any mdrun, so --smoke is enough and takes minutes rather than 15.
 source scripts/scc_env.sh
-python -m src.fep.window --variant G93A --leg folded --window 0 --rep 0 \
-  --config config/pipeline.yaml --out /tmp/ss_smoke_w0_r0.npz
-grep -c "CYS2\|CYX" results/fep/G93A/folded/system_r0/*.top   # expect >0  <-- the bond formed
-python -c "import numpy as np; z=np.load('/tmp/ss_smoke_w0_r0.npz'); print(z['u_kn_window'].shape, str(z['protocol']))"
-#   expect (20, 3001) and 822108e9db71124d
+python -m src.fep.window --variant G93A --leg folded --window 0 --rep 0 --smoke \
+  --config config/pipeline.yaml --out "$TMPDIR/ss_smoke_w0_r0.npz"
+#   npz goes to scratch, NOT into results/: run_window never skips an existing output, so a
+#   smoke-hash window left in results/fep/G93A/folded/ would make _check_single_protocol
+#   reject the whole variant later.
+
+# The guard is DISABLED in this arm (keep_disulfide_reduced: false), so this grep is the
+# ONLY verification that the topology is what we intend. Check the file the guard would
+# have read, and check BOTH directions:
+T=results/fep/G93A/folded/system_r0/hybrid.top
+grep -n "CYS2\|CYX" "$T"          # expect the C57/C146 pair present -> the bond formed
+grep -c "CYS2\|CYX" "$T"          # necessary but NOT sufficient on its own
+#   Then confirm no SPURIOUS bond: SOD1 has four cysteines (6, 57, 111, 146). Only 57-146
+#   may be bridged; C6 and C111 must remain free thiols with HG. If C6 or C111 appear as
+#   CYS2/CYX, pdb2gmx has over-bonded and the run is invalid -- STOP.
+
+# Clean up: --smoke stamps the run dir with a DIFFERENT protocol hash, so the array's real
+# w0_r0 task would hit assert_resumable and refuse. Remove the run dir; keep the system dir
+# (identical either way, and rebuilding costs time).
+rm -rf results/fep/G93A/folded/w0_r0
 
 # ---- 4. the array ---------------------------------------------------------------
 mkdir -p logs/fep
@@ -138,9 +177,10 @@ echo "$(date +%H:%M) done: $(find results/fep/G93A -name 'w*_r*.npz' | wc -l)/12
 python -m src.fep.analyze --variant G93A --config config/pipeline.yaml \
   --out results/fep/G93A/ddg_SS.json
 
-# ---- 7. label the tree so it can never be confused with the 2SH run -------------
+# ---- 7. label the tree, restore the baseline, leave the branch ------------------
 mv results/fep/G93A results/fep/G93A_SS_diagnostic
 mv results/fep/G93A_2SH_baseline results/fep/G93A
+git checkout main                   # diag/g93a-ss must never be merged
 ```
 
 **The manifest matters more than usual here**, because the hash cannot witness the state
@@ -150,6 +190,12 @@ change (§5). `results/fep/G93A_SS_diagnostic/MANIFEST.md` must record: disulfid
 redox state**. Without that note, a future `analyze` run could merge the two sets and the guard
 would not object.
 
+It must also record that **both legs carry `822108e9db71124d`** — the folded leg is physically
+SS, the unfolded one is state-free — so the shared hash across legs is expected here and is not
+evidence of contamination. And it must state that `structure.disulfide` was `reduced`
+throughout (trap 4), so the manifest does not look self-contradictory to someone who has not
+read this document.
+
 ## 8. Cost
 
 | | |
@@ -157,6 +203,11 @@ would not object.
 | folded | 60 windows × ~15 min = **~15 GPU-h** |
 | unfolded | 60 × ~2–3 min = **~3 GPU-h** |
 | **total** | **~18 GPU-h**, one array, well inside `h_rt=12:00:00` per task |
+
+**Both legs run; there is no folded-only mode.** `submit_array.sh` hardcodes `#$ -t 1-120` and
+decodes every task across `fep.legs`, and the runtime guard recomputes `legs*windows*reps = 120`
+and refuses `-t 1-60`. **Do not hand-edit `-t` without also fixing that guard** — they are
+coupled deliberately, and a mismatch exits 2 on every task. So the array is 120 windows, not 60.
 
 The unfolded leg is re-run rather than reused. It is physically identical (no cysteine in the
 tripeptide), so reuse would be defensible — but it costs 3 GPU-h to avoid copying result files
