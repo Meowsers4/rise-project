@@ -86,6 +86,18 @@ F64A deletes twice what I149A does from an equally buried site and is reported a
 zero. Extrapolating the other two gives ~1.35 kcal/mol per deleted atom, i.e. ~8 for F64A —
 so the FEP value sits on that trend and the experimental value is the outlier.
 
+> **Retracted (2026-09-12).** The argument in this subsection does not survive the primary
+> source. Nordlund & Oliveberg's Table 1 gives F64A ΔG = **3.07** against pWT **2.87** — F64A
+> is measurably *more* stable than its own reference, and −0.20 is that difference sitting in
+> an internally consistent series (I18V 2.50 → 0.37, I149A −1.18 → 4.05, each matching
+> `variants.csv` exactly). The atom-count extrapolation below predicts ~8 kcal/mol of
+> destabilization and concludes "the experimental value is the outlier"; that conclusion is
+> **withdrawn**. The measurement is not an outlier in a table, and "the experiment is probably
+> wrong" is no longer an available explanation for the ~7 kcal/mol gap. See
+> [`reference_state_audit.md`](reference_state_audit.md) §4.1. The paragraph is kept, struck
+> through in effect, because the reasoning error — extrapolating a trend across three points
+> and preferring it to a direct measurement — is worth remembering.
+
 **This is not grounds to drop F64A**, for the reason already argued in the failure doc:
 excluding a control because it produced an inconvenient FEP number is the same category of
 post-hoc adjustment as lowering `min_pearson`. It is recorded so that the +7 "error" is not

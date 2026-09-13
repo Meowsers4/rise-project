@@ -165,7 +165,7 @@ the project's sharpest scientific content (claim C2):
 - F64A's folded r1 has hysteresis **0.023** and is the replicate that disagrees with its
   two independently-solvated siblings by **1.20 kcal/mol** — the largest replicate
   disagreement of the 48 (variant, leg, replicate) records in the archive, at a hysteresis
-  in the lowest quintile (rank 10/48). It is NOT "the lowest hysteresis recorded anywhere":
+  in the lowest ~20% (rank 10/48). It is NOT "the lowest hysteresis recorded anywhere":
   that claim stood in three files until 2026-09-12 and is false (G93A unfolded r2 is 0.0017,
   13x lower). Over all 48 records, folded-leg hysteresis and independent-box disagreement are
   near-uncorrelated (Pearson +0.072, Spearman +0.080, n=24) —

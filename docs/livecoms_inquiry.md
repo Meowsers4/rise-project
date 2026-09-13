@@ -32,7 +32,7 @@ which explicitly accepts failed studies and reproducibility investigations.
 > Across 48 (variant, leg, replicate) records, within-ladder forward/reverse hysteresis is
 > near-uncorrelated with whether a replicate agrees with independently solvated repeats of
 > itself (folded leg: Pearson +0.07, Spearman +0.08, n = 24). The single sharpest case is a
-> replicate whose hysteresis sits in the lowest quintile of the whole dataset while carrying
+> replicate whose hysteresis sits in the lowest ~20% of the whole dataset while carrying
 > the largest replicate disagreement in it (1.20 kcal/mol). I want to be careful here: this
 > does not identify which replicate is correct, and two agreeing replicates are not ground
 > truth. The claim is only that the diagnostic did not separate them.
@@ -46,20 +46,26 @@ which explicitly accepts failed studies and reproducibility investigations.
 > **3. The largest identified problem was a reference-state mismatch, found by reading the
 > primary sources rather than by computing.** Every experimental control had been taken through
 > a compilation paper that states no experimental conditions. Going back to the primary
-> measurements, all of them were made with the Cys57–Cys146 disulfide intact, while the
-> calculations were run on the reduced form; and two of the eight were calorimetric
-> measurements on the apo dimer, filed in a monomer column. Both were traceable to a single
-> compilation step where the conditions were dropped. I suspect this failure mode — an
+> measurements, six of the eight are verified at source as having been made with the
+> Cys57–Cys146 disulfide intact, while the calculations were run on the reduced form. The
+> other two are calorimetric rather than chemical-denaturation measurements and appear to be
+> on the apo dimer rather than the monomer they are filed as — that paper is not open access
+> and I have not confirmed it directly, so I am holding those two as provisional. Both issues
+> trace to a single compilation step where the conditions were dropped. I suspect this failure mode — an
 > experimental benchmark column assembled from a review, with heterogeneous constructs and
 > redox states flattened into one number — is not specific to SOD1.
 >
-> All estimates in the study have been re-derived from the archived per-window reduced
-> potentials in three independent local environments spanning both pymbar backends, and agree
-> with the original run-time records to ≤ 3e-12 kcal/mol, so the numbers reported are
-> reproducible rather than transcribed.
+> Seven of the eight estimates have been re-derived from the archived per-window reduced
+> potentials in three independent local environments spanning both pymbar backends, agreeing
+> with the original run-time records to ≤ 3e-12 kcal/mol. The eighth is a gap I would rather
+> state than have found: that variant's raw windows were overwritten by a later resubmission
+> before they were archived, so its point survives only as the run-time record its original
+> analysis wrote. It contributes to the reported r and RMSE, which are therefore
+> seven-eighths re-derived and one-eighth attested. Archiving before resubmitting, not after,
+> is itself one of the operational lessons.
 >
 > I am aware of the limits. This is one target, one force field, one estimator, one water
-> model, and 48 records from eight variants at five sites — not a multi-system study, which I
+> model, and 48 records from eight variants at six sites — not a multi-system study, which I
 > understand *Lessons Learned* prefers. The convergence-versus-correctness principle itself is
 > prior art; the contribution I am claiming is the reproducible failure record, the
 > reference-state audit as a procedure, and the operational lessons, not the principle.
@@ -81,6 +87,7 @@ Checked against `CLAUDE.md`'s forbidden framings and the review's list of withdr
 - Does **not** attribute the position-93 discrepancy to backbone entropy, or to anything.
 - Does **not** claim the experimental values are wrong. §4.1 of the audit closed that off: F64A's ΔG is measurably *above* its pWT reference.
 - Does **not** present the reference-state mismatch as the explanation of the gate failure. It cannot be — the residuals are site-dependent and a common reference offset is not.
+- Does **not** claim provenance it does not have: A4V's gate point is excluded from the re-derivation claim, and the two Stathopulos controls are marked provisional rather than verified. Both were overstated in the first draft and corrected 2026-09-12 — in a letter whose entire value is provenance, those are the two claims an editor could actually check.
 
 ## 3. Before sending — two things I could not settle
 

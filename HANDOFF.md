@@ -226,7 +226,7 @@ variant; every problem lives in the folded leg.
 
 The sharpest result is not a ΔΔG. It is that **cycle closure cannot distinguish a converged
 calculation from a wrong one** — F64A's best-behaved replicate (hysteresis 0.023, lowest
-quintile of the archive at rank 10/48) is the one that disagrees with its siblings by 1.20
+~20% of the archive at rank 10/48) is the one that disagrees with its siblings by 1.20
 kcal/mol, the largest such disagreement in the dataset. Over all 48 (variant, leg, replicate)
 records, folded-leg hysteresis barely tracks independent-box disagreement at all (Pearson
 +0.072, n=24). Re-derived from raw windows 2026-09-12:

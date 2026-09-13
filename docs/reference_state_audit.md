@@ -117,7 +117,7 @@ folded leg — the one this project has never got to converge — where it would
 
 Two observations bear on it, pointing in opposite directions:
 
-- **Against the disulfide as the main error:** the gate's residuals are not a uniform offset. Non-glycine errors are all positive (+0.46, +0.93, +1.34, +1.74) and all three position-93 errors negative (−1.17, −2.50, −4.17). A reference-state difference common to all eight points cannot produce a site-dependent sign flip. It cannot be the whole story, and it is not an alternative explanation for the position-93 compression.
+- **Against the disulfide as the main error:** the gate's residuals are not a uniform offset. Non-glycine errors are all positive (+0.46, +0.93, +1.34, +1.92 — the gate-of-record A4V value from `gate_attempt_1.md`, not the attempt-2 rerun's +1.74) and all three position-93 errors negative (−1.17, −2.50, −4.17). A reference-state difference common to all eight points cannot produce a site-dependent sign flip. It cannot be the whole story, and it is not an alternative explanation for the position-93 compression.
 - **For it mattering:** it is a systematic, un-modelled difference affecting every point, and unlike sampling it **cannot be reduced by spending GPU hours.** Gate attempt 2 already established by direct test that sampling was not the limiting error (A4V, 3 ns → 9 ns folded: precision 5×, accuracy 9%). This is a candidate for what the residual actually is, and it is testable.
 
 **The cheap test exists.** `keep_disulfide_reduced` is a config flag, and the engine already
@@ -184,7 +184,7 @@ extrapolation from the transition region back to zero denaturant.
 Two consequences. First, Kumar's blanket ±0.3 is certainly too tight for this point: an
 extrapolated ΔG through a negative value carries the m-value uncertainty as well. Second, and
 more awkwardly, **our FEP computes a folded-state ΔΔG for a variant whose experimental folded
-state is not populated.** I149A is the third-largest gate reference (4.05) and the second most
+state is not populated.** I149A is the **second**-largest gate reference (4.05, behind only G93V's 7.00) and the second most
 accurate FEP point (+0.93 error). Neither observation is grounds to remove it, but a gate
 anchored partly on an extrapolation from an unfolded protein is measuring something other than
 pure calculation error.
@@ -236,12 +236,14 @@ Verified against primary or quoted primary text:
 - Kumar 2017 exists, is a compilation, names its five upstream sources, states ~0.3 kcal/mol methodological error, and gives no experimental conditions.
 - Lindberg 2005: construct, monomeric variant, apo/EDTA, pH 6.3, 25 °C, urea, **disulfide intact** (direct quotation), and the ΔG values that reproduce A4V/G93A/I113T exactly.
 - **Nordlund & Oliveberg 2006 (closed 2026-09-12):** construct, buffer, pH 6.3, 25 °C, **disulfide intact** (direct quotation), and ΔG/ΔΔG for pWT, F64A, I18V and I149A — all three reproducing `variants.csv` exactly and internally consistent with the reported pWT.
-- Stathopulos 2006: DSC, cysteine-free pseudo-WT, apo and holo, G93 series, ΔTm magnitudes.
+- Stathopulos 2006: **secondary only.** That it is DSC on a cysteine-free pseudo-WT covering the G93 series is consistent across several independent secondary descriptions, but the paper itself is inaccessible (JBC 403, not in PMC), so even the ΔTm magnitudes (~8 °C G93S, ~16 °C G93V) are second-hand and belong below, not here.
 
 **Not verified — do not cite these as established:**
 
 - **Stathopulos's numeric ΔΔG** for G93S (3.70) and G93V (7.00), and how a ΔTm was converted into them. JBC returns 403 and **the paper is not in PMC** (PMID 16407238, checked via the NCBI ID converter), so this one genuinely needs library access. It is now the only outstanding numeric check, and it covers the two variants §5 argues are the least comparable and §5 notes are the two largest contributors to the gate failure.
 - Whether Stathopulos used any interface mutation. Absence of a report is not proof of absence; §5's dimer inference rests on that absence.
+- **Stathopulos's ΔTm magnitudes and disulfide state.** Neither is quoted from the paper. The disulfide is *inferred* from the cysteine-free background, not stated. So of the eight controls, **six are verified at source and two are provisional** — and the two provisional ones are G93S and G93V.
+- **`variants.csv:42` labels a row `C111A` (WT-relative, Cys→Ala) while N&O measured `A111C`** — restoring the cysteine onto their C6A/C111A pWT. Same substitution, opposite direction, so the ΔΔG sign convention may be inverted for that row. **Not a gate row and pre-existing**, so nothing was changed; recorded because it is the same reference-frame confusion this audit is about, one level down.
 - Kumar's Table S1 itself — whether our eight values match his rows, and whether he applied any harmonization.
 - The Vassall 2006 and Byström entries, which supply other rows of the 54 but none of our eight.
 

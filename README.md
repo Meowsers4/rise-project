@@ -343,7 +343,11 @@ sod1-fep/
 
 ### Resolved
 - ~~FEP framework~~ → **GROMACS + pmx** (see §2.4).
-- ~~λ-window count~~ → 18. ~~Replicate count~~ → 5.
+- ~~λ-window count~~ → **20** (18 until `927b302`, which refined the endpoint; the changelog
+  entry for 2026-08-07 records the superseded value of 18 and is left as history).
+  ~~Replicate count~~ → **3 in `config/pipeline.yaml` today.** README resolved this at 5 and
+  that raise is still pending — see `CLAUDE.md` rule 5, which requires `#$ -t` to go 120 → 200
+  in the same commit. **`config/pipeline.yaml` is the source of truth, not this line.**
 
 ### Newly opened by the 2026-08-07 audit (these block claims, not compute)
 - **Charge-changing handling:** co-alchemical counterion vs Rocklin-type post-hoc

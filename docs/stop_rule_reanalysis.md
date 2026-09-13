@@ -7,12 +7,17 @@ four-week recommendation is conditioned on:
 > replicate-disagreement example, withdraw this recommendation.
 
 **Verdict: the stop rule passes. The four-week plan stands.** Every documented ΔΔG, cycle
-closure, per-leg ΔG, hysteresis and overlap re-derives from the archived NPZ windows to
+closure, per-leg ΔG, hysteresis and overlap **except A4V's gate point** re-derives from the
+archived NPZ windows to
 floating-point rounding, in **three independent local environments spanning both pymbar
 backends** (§1): Δ ≤ 3.1e-12 against the SCC records across all eight variants (≤ 3.2e-12 for
 any pairwise comparison), and ≤ 5.7e-15 on every F64A field (3.1e-15 on the per-leg estimates
-tabulated in §3). The review's finding that "every reported SOD1 result in this repo is
-documentation arithmetic, not a reproduced MBAR estimate" is now discharged.
+tabulated in §3). **A4V's gate point is the one exception and cannot be re-derived** — its 3 ns
+folded windows were overwritten by the attempt-2 resubmission, so it survives only as a
+run-time JSON record (§2, §7). It contributes to the gate r/RMSE, so that statistic is
+seven-eighths reproduced and one-eighth attested. The review's finding that "every reported
+SOD1 result in this repo is documentation arithmetic, not a reproduced MBAR estimate" is
+discharged for every result but that one.
 
 **One documented claim is false and is corrected below** (§5): F64A folded r1's hysteresis is
 *not* the lowest recorded anywhere in the project. The finding it was cited for survives, and
@@ -179,7 +184,7 @@ The superlative was decoration. The finding it decorated is intact, and the arch
 quantitative version the single anecdote could not.
 
 **F64A folded r1 has the largest replicate disagreement of all 48 records (rank 1/48,
-1.2026 kcal/mol) while sitting in the lowest quintile of the hysteresis distribution (rank
+1.2026 kcal/mol) while sitting in the lowest ~20% of the hysteresis distribution (rank
 10/48).** That is the same point, stated as a position in a measured distribution rather than
 as a superlative.
 
@@ -275,7 +280,7 @@ Not established, and not addressable by reanalysis:
 - That the windows encode the intended physical system. Reproducing an estimate from saved reduced potentials cannot detect a wrong topology, redox state, residue mapping, cap geometry or unit. That is the reference-state audit, still to be written.
 - That the experimental references are comparable to what was simulated (`docs/reference_state_audit.md`, not yet written).
 - Anything about A4V's gate point beyond its run-time record.
-- Generality. 48 records is 8 variants at 5 sites, one target, one force field, one estimator, one water model. The correlations in §6 are a statement about this dataset, not about FEP.
+- Generality. 48 records is 8 variants at **6 sites** (4, 18, 64, 93, 113, 149; the seven *usable* gate points span 5, F64A being the excluded one), one target, one force field, one estimator, one water model. The correlations in §6 are a statement about this dataset, not about FEP.
 - Which replicate sampled the correct basin. Two agreeing replicates are still not ground truth — the review's caution stands.
 - The §6 overlap/closure-vs-error rankings mix protocols: A4V's row is the 9 ns folded rerun, the other six are 3 ns. Six of seven are internally consistent; the seventh is the only A4V point that re-derives from raw output. Stated as a negative result, so the mixing weakens nothing it claims — but it rules the table out as a positive finding on its own.
 
