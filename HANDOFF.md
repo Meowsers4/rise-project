@@ -176,8 +176,12 @@ Pre-registered 2026-08-07, before any gate evaluation. **Never lower one to make
    (2SH) form. Separately, G93S and G93V are **DSC measurements on the apo dimer**, not
    apo-monomer as `variants.csv` labels them — which explains the "monomer > dimer" oddity
    without impugning the measurements. A4V/G93A/I113T re-derive exactly from Lindberg 2005, so
-   the panel arithmetic is sound. F64A's −0.20 has **not** been checked against Nordlund &
-   Oliveberg's primary table (PNAS 403'd); that is the top remaining item.
+   the panel arithmetic is sound. **All six values with a reachable primary table now reproduce
+   exactly** (Lindberg 2005 and Nordlund & Oliveberg 2006, the latter closed 2026-09-12 via
+   PMC1502438). F64A's −0.20 is a real measured ΔG *above* pWT (3.07 vs 2.87), so "the
+   experiment is wrong" is no longer available; and I149A's apo monomer has negative absolute
+   stability (ΔG −1.18), making its 4.05 an extrapolation. Only G93S/G93V remain unchecked —
+   Stathopulos is not in PMC and needs the BU library.
    **Do not drop a control because it produced an inconvenient FEP number** — that is the
    same category of post-hoc adjustment as lowering `min_pearson`. Check the primary
    sources first, and write the argument down before any gate evaluation.
