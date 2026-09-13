@@ -907,3 +907,28 @@ def test_run_pmx_window_uses_THIS_leg_schedule_for_both_mdp_and_discard(monkeypa
     assert out["u_kn_window"].shape[1] == n_records - f_sched["discard"]
     u_sched = pe.window_schedule(cfg, "unfolded")
     assert f_sched["discard"] != u_sched["discard"]
+
+
+def test_ss_flag_is_omitted_when_the_disulfide_is_wanted():
+    """`-ss` is interactive selection; omitting it lets pdb2gmx auto-detect the bond.
+
+    Passing `-ss` with no stdin answers does not produce a wrong topology -- it HANGS,
+    because pdb2gmx blocks on a prompt nobody answers. That is what happened on the first
+    end-to-end run of the SS diagnostic. Guard both directions.
+    """
+    from src.fep.pmx_engine import _pdb2gmx_stdin, _ss_argv
+
+    reduced = {"fep": {"keep_disulfide_reduced": True}}
+    oxidised = {"fep": {"keep_disulfide_reduced": False}}
+
+    # Reduced: prompt ON, and answers supplied to decline every pair.
+    assert _ss_argv(reduced) == ["-ss"]
+    assert _pdb2gmx_stdin(reduced, 4).strip().splitlines() == ["n"] * 4
+
+    # Oxidised: prompt OFF, so the empty stdin can never block anything.
+    assert _ss_argv(oxidised) == []
+    assert _pdb2gmx_stdin(oxidised, 4) == ""
+
+    # The dangerous combination must be unreachable: -ss present with no answers.
+    for cfg in (reduced, oxidised):
+        assert not (_ss_argv(cfg) and not _pdb2gmx_stdin(cfg, 4))

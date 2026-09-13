@@ -303,6 +303,23 @@ def _pdb2gmx_stdin(cfg: dict, n_cysteines: int) -> str:
     return "\n".join(["n"] * max(1, n_cysteines)) + "\n"
 
 
+def _ss_argv(cfg: dict) -> list[str]:
+    """``-ss`` only when we intend to DECLINE disulfides.
+
+    ``-ss`` switches pdb2gmx to *interactive* SS-bond selection; its default is automatic
+    detection by SG-SG distance. The reduced form is enforced by turning that prompt on and
+    answering "n" to every pair (:func:`_pdb2gmx_stdin`).
+
+    When ``fep.keep_disulfide_reduced`` is false the automatic detection is exactly what we
+    want -- Stage 1 stripped the topology bond but left the SG atoms ~2 A apart, so pdb2gmx
+    re-forms C57-C146 on its own. Passing ``-ss`` in that case is a HANG, not a wrong
+    answer: ``_pdb2gmx_stdin`` returns "" and pdb2gmx blocks on a prompt that never gets a
+    reply. Found 2026-09-13 on the first end-to-end run of the SS path, which sat in the
+    queue for hours doing nothing.
+    """
+    return ["-ss"] if cfg["fep"].get("keep_disulfide_reduced", True) else []
+
+
 def _count_cys_pairs(pdb: Path) -> int:
     """Answers to supply to pdb2gmx's ``-ss`` prompts.
 
@@ -542,7 +559,7 @@ def build_system(cfg: dict, variant: str, leg: str, rep: int | None = None,
         #    parse zero residues and die in make_chains(). This pass only normalises
         #    naming and hydrogens to the pmx force field; its topology is discarded.
         _run([gmx, "pdb2gmx", "-f", "wt.pdb", "-o", "wt_gmx.pdb", "-p", "wt_discard.top",
-              "-ff", ff, "-water", water, "-ignh", "-ss", *heavyh],
+              "-ff", ff, "-water", water, "-ignh", *_ss_argv(cfg), *heavyh],
              cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
 
         # 2. pmx mutate on the pdb2gmx output. The resid is read from THAT file: pdb2gmx
@@ -559,7 +576,7 @@ def build_system(cfg: dict, variant: str, leg: str, rep: int | None = None,
         #    No -ignh here: the hybrid residue's hydrogens were built by pmx mutate and
         #    pdb2gmx has no hdb entry for hybrid residues, so rebuilding them fails.
         _run([gmx, "pdb2gmx", "-f", "hybrid.pdb", "-o", "conf.gro", "-p", "topol.top",
-              "-ff", ff, "-water", water, "-ss", *heavyh],
+              "-ff", ff, "-water", water, *_ss_argv(cfg), *heavyh],
              cwd=sys_dir, stdin=ss_answers, dry_run=dry_run)
 
         # 4. pmx gentop -- write the B-state (mutant) parameters into the topology.
