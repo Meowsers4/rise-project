@@ -1,8 +1,16 @@
 # Pre-registration — G93A disulfide diagnostic (SS vs 2SH)
 
-**Status: PRE-REGISTERED, NOT RUN. Awaiting the user's sign-off**, which `CLAUDE.md` rule 1
-requires because v1 is defined as the disulfide-reduced form. Written before any SS window
-exists, so the interpretation below cannot be adjusted to the result.
+**Status: PRE-REGISTERED. Signed off by the user 2026-09-12; config staged on branch
+`diag/g93a-ss` (never to be merged). No SS window has been run.** `CLAUDE.md` rule 1 required
+that sign-off because v1 is defined as the disulfide-reduced form. Everything below — baseline,
+endpoint, and all five outcome readings — was written and committed (`6d3926f`, `5430dac`)
+before any SS window existed, so the interpretation cannot be adjusted to the result.
+
+> **The automated checks cannot see this experiment.** The full test suite passes unchanged
+> (105 passed, 12 skipped) with `keep_disulfide_reduced: false`, and the protocol fingerprint is
+> byte-identical to the 2SH baseline (§5). Nothing in the repo will tell you which physical
+> state a window came from. The branch discipline (§7 step 2) and the MANIFEST (§7) are the
+> only provenance this arm has.
 
 ## 1. The question
 

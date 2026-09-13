@@ -171,10 +171,13 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   # get stuck in; the folded protein does. Sampling them equally spends ~30% of the
   # compute where there is no defect.
   ns_per_window:
-    folded: 9             # TRIPLED 2026-09-03 after the gate failed at r=0.326.
+    folded: 3             # DIAGNOSTIC BRANCH ONLY: reverted 9 -> 3 so the folded fingerprint is
+                          # 822108e9db71124d, identical to the G93A 2SH baseline. Without this
+                          # the run would vary disulfide AND sampling at once. main keeps 9.
     unfolded: 3           # Unfolded left alone -- it is already converged.
   equilibration_ns:         # discarded before MBAR; buys RELAXATION, not samples
-    folded: 2.0           # raised with production: the diagnosis is that the folded leg
+    folded: 0.5           # DIAGNOSTIC BRANCH ONLY: reverted 2.0 -> 0.5 with ns_per_window
+                          # above; both are required to reproduce 822108e9db71124d. main keeps 2.0.
     unfolded: 0.5         # does not RELAX, and discarded time is what buys relaxation.
   # --- real Perses window: integrator / ensemble / alchemy (read by src/fep/window.py) ---
   # Solvation reuses structure.solvent_padding_nm + structure.ion_conc_M (Perses solvates the
@@ -231,7 +234,15 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   # pdb2gmx must NOT re-form the Cys57-Cys146 disulfide -- v1 is the REDUCED form
   # (README 2.1). Stage 1's fix operates on an OpenMM topology, so GROMACS needs its own
   # guard: pdb2gmx is told every cysteine is a free thiol.
-  keep_disulfide_reduced: true
+  keep_disulfide_reduced: false
+                          # ^^ DIAGNOSTIC BRANCH diag/g93a-ss ONLY -- NEVER MERGE TO MAIN.
+                          # false suppresses the pdb2gmx '-ss' answers, so pdb2gmx re-detects
+                          # C57-C146 by SG-SG distance and forms it: this is the ONLY way the
+                          # SS state is produced. structure.disulfide stays 'reduced' -- setting
+                          # it to 'oxidized' ABORTS the build (src/prep/build.py:187).
+                          # It also disables assert_topology_disulfide_free, so the smoke-test
+                          # grep of system_r0/hybrid.top is the only verification that exists.
+                          # See docs/prereg_g93a_disulfide_diagnostic.md.
   lambda_protocol: default     # unused by the GROMACS path (kept for the perses engine)
   unfolded_reference: tripeptide_native  # ACE-[i-1][i][i+1]-NME, neighbors from the WT structure
   checkpoint_interval_steps: 50000       # READ ONLY by the dead perses engine; GROMACS's
