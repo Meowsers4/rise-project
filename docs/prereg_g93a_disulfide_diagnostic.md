@@ -126,7 +126,7 @@ Computed locally 2026-09-12 against the committed engine:
   trusted residue labels rather than the physical bond and HG pattern.
 - No gate variant's tripeptide contains Cys57 or Cys146 (closest: I149A at 148–150), confirming §3's cancellation argument.
 
-## 6. Three traps that would make this measure nothing
+## 6. Four traps that would make this measure nothing
 
 **1. The cached system silently defeats the flag.** `build_system` fast-paths on the
 `SYSTEM_READY` marker ([pmx_engine.py:508](../src/fep/pmx_engine.py#L508)), which encodes no
@@ -140,7 +140,7 @@ guard and be resumed under the SS config. This is precisely the 2026-08-11 G93A 
 guard's own docstring describes, and the guard is blind to it here. *Mitigation: same as trap 1
 — no stale run dir may exist. This is why the tree is moved, not merged.*
 
-**4. `structure.disulfide` must stay `reduced` — do not "fix" it.** This is the most
+**3. `structure.disulfide` must stay `reduced` — do not "fix" it.** This is the most
 counter-intuitive part of the design and the one most likely to be broken by a well-meaning
 edit. `prepare_variant` **hard-raises** unless `structure.form == "apo"` and
 `structure.disulfide == "reduced"` ([build.py:187](../src/prep/build.py#L187)), so setting it to
@@ -157,7 +157,7 @@ and `hybrid.top`, together with the C57/C146 HG removal, subsequently proved it.
 Consequence: `structure.disulfide: reduced` remains correct and unchanged throughout this
 experiment, and the only config key touching redox is `fep.keep_disulfide_reduced`.
 
-**3. Sampling must be reverted too, or it confounds.** The committed config is 9 ns / 2.0 ns
+**4. Sampling must be reverted too, or it confounds.** The committed config is 9 ns / 2.0 ns
 folded. Running at 9 ns would vary disulfide **and** sampling simultaneously and break
 comparability with the 1.17 baseline. Three config values change, not one.
 
@@ -185,7 +185,7 @@ ls results/fep/G93A 2>/dev/null && echo "STOP: G93A still present" || echo "clea
 #   fep.keep_disulfide_reduced : true -> false
 #   fep.ns_per_window.folded   : 9    -> 3
 #   fep.equilibration_ns.folded: 2.0  -> 0.5
-#   fep.structure.disulfide    : UNCHANGED ("reduced") -- see trap 4
+#   structure.disulfide        : UNCHANGED ("reduced") -- see trap 3
 #
 # CRITICAL: these must NOT land on main. If they do, every later array -- including the
 # week-2/3 F64A and G93V runs -- silently executes SS at 3 ns. Use a throwaway branch:
@@ -208,9 +208,11 @@ python -m src.fep.window --variant G93A --leg folded --window 0 --rep 0 --smoke 
 # The reduced-state guard is disabled in this arm. Verify the direct SG-SG bond and HG
 # pattern; residue-name grep is invalid because GROMACS preserves the label CYS here:
 T=results/fep/G93A/folded/system_r0/hybrid.top
-python -m src.fep.pmx_engine --inspect-system results/fep/G93A/folded/system_r0
-# expect actual SG-SG bonds [(57, 146)] and HG only on residues 6 and 111 in both
-# pdb2gmx topologies and hybrid.top.
+# The historical `pmx_engine --inspect-system` helper exists only on diag/g93a-ss, not main.
+# On main, inspect the physical atom/bond tables with the archived-analysis helper:
+python -c 'from src.analysis.methods_figures import inspect_cysteine_topology as f; print(f("results/fep/G93A/folded/system_r0/hybrid.top"))'
+# expect sg_bonds [(57, 146)] and hg_residues [6, 111]. Repeat for system_r1/r2 and both
+# pdb2gmx topologies; residue-name grep alone is invalid.
 
 # Clean up: --smoke stamps the run dir with a DIFFERENT protocol hash, so the array's real
 # w0_r0 task would hit assert_resumable and refuse. Remove the run dir; keep the system dir

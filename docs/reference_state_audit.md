@@ -17,9 +17,11 @@ a category error in the compilation: 3.70 and 7.00 kcal/mol are whole-dimer apo 
 49.4 °C, not apo-monomer values at 25 °C. The problem is the state and normalization, not a
 transcription error. See §5.
 
-This is a **scope conflict for the user to resolve**, per `CLAUDE.md` ("surface the conflict
-instead of silently choosing"). No protocol parameter, panel value, or gate verdict has been
-changed on the strength of it. See §7.
+This remains a **scope conflict awaiting explicit user sign-off**. The bounded recommendation
+is to retain apo-2SH, report the state mismatch, and stop the present GPU campaign, but adopting
+that recommendation would retire load-bearing claims C1 (charge-changing coverage) and C3
+(uncharacterized-variant triage). Rule 6 therefore prevents treating it as resolved. No
+protocol parameter, panel value, gate verdict, or claim contract has been changed. See §7.
 
 ---
 
@@ -229,8 +231,22 @@ melting temperatures at 0.50 mg/ml are 59.0, 50.7 and 43.1 °C (ΔTm −8.3 and 
 The authors fit the DSC data to the dimer model, use a common heat-capacity model
 (`ΔCp = 3.30 kcal mol⁻¹ °C⁻¹` for the reported constant-ΔCp calculation), extrapolate each
 ΔG to the common apo `tavg = 49.4 °C`, and then calculate
-`ΔΔG = ΔG(mutant) − ΔG(pseudo-WT)`. At 25 °C Table 2 gives −3.5 for G93S and −7.0 for
-G93V per dimer; the repo instead contains the common-`tavg` values, +3.7 and +7.0.
+`ΔΔG = ΔG(mutant) − ΔG(pseudo-WT)`.
+
+**Correction, 2026-09-14:** the final paired values in each Table 2 row are not the 49.4 °C
+and 25 °C ΔΔGs. They are the constant-ΔCp and temperature-dependent-ΔCp estimates at
+`tavg`. This is forced by the table arithmetic: the paired ΔG columns are pWT 11.3/11.2,
+G93S 7.7/7.7 and G93V 4.3/4.2 at `tavg`, followed by pWT 17.3/15.8, G93S 15.3/14.4 and
+G93V 12.2/11.6 at 25 °C. Thus the nominal 25 °C whole-dimer effects, computed from the
+displayed ΔGs rather than directly tabulated as ΔΔG, are **2.0/1.4 for G93S** and
+**5.1/4.2 for G93V** (constant/temperature-dependent ΔCp, sign-flipped to the repo's
+positive-destabilizing convention). The earlier statement that Table 2 gives −3.5/−7.0 at
+25 °C mixed temperature with the alternate heat-capacity calculation and was wrong.
+
+The source uncertainties on those 25 °C absolute ΔGs are large: pWT is ±2.4 kcal/mol,
+compared with ±0.4/0.4 for G93S and ±0.2/0.3 for G93V. Naive independent-error propagation
+therefore gives about ±2.4 kcal/mol on each derived dimer ΔΔG. The nominal values are useful
+for sensitivity analysis, not a precise replacement reference.
 
 This resolves the long-standing "monomer > dimer" oddity. **These are not suspect
 measurements. They are correctly transcribed measurements of different metal states, with the
@@ -253,11 +269,16 @@ separate the two.
 Both are corrected in the same commit as this document. Note the pair is instructive: one file
 under-claimed and one over-claimed the *same* citation, and the gate ran on it for a month.
 
-## 7. Conflicts for the user to resolve
+## 7. Scope decision awaiting sign-off and remaining reference limitations
 
-Per `CLAUDE.md`, surfaced rather than decided:
-
-1. **Simulated state vs measured state.** v1 simulates apo-2SH (rule 1, non-negotiable, "if holo seems needed, STOP and ask"). Every gate control is apo-SS. Either the simulation moves to the state the controls were measured in, or the gate needs controls measured in apo-2SH, or the mismatch is accepted and stated as a limitation in every result. Rule 1 makes this the user's call. **It is the single most consequential open question in the project** — more so than any remaining sampling question, because sampling was already excluded by direct test.
+1. **Simulated state vs measured state — recommendation only.** The evidence supports retaining
+   apo-2SH rather than switching the campaign on the strength of one negative G93A SS test. The
+   proposed path is to report the completed gate as an apo-2SH calculation compared with a
+   heterogeneous apo-SS benchmark, stop the present GPU campaign, and require a new,
+   pre-registered matched apo-2SH benchmark before future prediction. If that benchmark cannot
+   be assembled, apo-SS is a separate campaign. **This path is not adopted until the user signs
+   off on retiring C1 and C3 or supplies a different plan.** Until then, GPU submission is on
+   hold; the hold is not a claim-scope decision.
 2. **Free cysteines.** The Lindberg and Nordlund controls are C6A/C111A; the Stathopulos
    controls are C6A/C111S. We simulate wild-type C6 and C111. Same class of issue, smaller
    magnitude, and it interacts with (1): the substitutions exist precisely to stop the free
@@ -309,11 +330,14 @@ flip. What fails is Kumar's apo-monomer label, not the numeric transcription.
 
 ## 9. Next
 
-1. Decide conflict 7.1 using the now-closed eight-point provenance audit and the completed
-   G93A SS diagnostic. Preserve the original gate as the gate-of-record.
-2. Run a clearly labeled **forensic sensitivity analysis** using the Stathopulos per-monomer
-   normalization and 25 °C values. This may quantify reference heterogeneity but must not be
-   called a new gate or used to change the preregistered verdict.
+1. **Obtain explicit scope sign-off.** The current recommendation is to retain apo-2SH, end the
+   present GPU campaign, and require a new matched benchmark before any future predictive
+   campaign. Adopting it would retire C1 and C3, so `CLAUDE.md` remains unchanged until the user
+   approves that consequence. Preserve the original gate as the gate-of-record.
+2. ~~Run a clearly labeled **forensic sensitivity analysis** using the Stathopulos
+   normalization and 25 °C values.~~ **Completed 2026-09-14:** see
+   [`reference_sensitivity_analysis.md`](reference_sensitivity_analysis.md). It preserves the
+   frozen predictions and F64A exclusion and does not alter the gate verdict.
 3. Audit the remaining non-gate Kumar rows before using them as a future validation panel;
    the Stathopulos category error shows that column labels cannot be trusted without checking
    each primary source.

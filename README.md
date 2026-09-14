@@ -498,7 +498,10 @@ Do not claim any of the following. Each is anticipated:
   experimental stability compilation used as the control anchor (~47 mutations
   across apo-monomer / holo-dimer / loopless structures; PoPMuSiC and FoldX were
   the best of 8 predictors tested; apo-monomer vs holo-dimer ΔΔG correlated
-  R²≈0.70). Sound anchor, but an old and well-mined dataset.
+  R²≈0.70). **Not a state-homogeneous anchor:** the source audit found that its
+  G93S/G93V “apo-monomer” values are whole-dimer apo DSC results at 49.4 °C, and
+  all eight gate controls are disulfide-intact while this project simulates 2SH.
+  See `docs/reference_state_audit.md` and `docs/reference_sensitivity_analysis.md`.
 - **ML/empirical predictors already applied to SOD1:** FoldX, Rosetta
   cartesian_ddg, DDGun, DynaMut2, mCSM, SAAFEC-SEQ, MAESTRO, AlphaMissense. SOD1 is
   a textbook demonstration target — assume any given predictor has been run on it.
