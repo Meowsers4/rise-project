@@ -1,19 +1,23 @@
 # Pre-registration — G93A disulfide diagnostic (SS vs 2SH)
 
-**Status: TOPOLOGY GATE UNDER RECHECK (2026-09-13); DO NOT RESUBMIT YET.** The original
-smoke report said `bridged: []`, `free thiol: [6, 57, 111, 146]`, but that checker inferred
-state only from printed residue labels (`CYS2`/`CYX`). A subsequent atom-list inspection
-found the stronger expected pattern: C57/C146 have no HG while C6/C111 retain HG, even though
-all are printed as `CYS`. The active `specbond.dat` contains the expected CYS-SG rule. The
-actual SG-SG bond directive must now be checked; it decides whether the original verdict was
-a false negative or the topology is merely deprotonated and still invalid. The later
-`KeyError: 'OUT'` was only a smoke-script reporting bug after the name-based verdict.
+**Status: TOPOLOGY GATE PASSED ON RECHECK (2026-09-13); PRODUCTION STATUS PENDING.** The
+original smoke report said `bridged: []`, `free thiol: [6, 57, 111, 146]`, but that checker
+inferred state only from printed residue labels (`CYS2`/`CYX`). Direct inspection proved that
+verdict was a false negative: both pdb2gmx topologies and `pmx gentop` contain the actual
+C57-C146 SG-SG bond, C57/C146 lack HG, and only C6/C111 retain HG. All four coordinate stages
+preserve the intended ~2.03-2.04 Å sulfur separation. GROMACS preserved the displayed residue
+label `CYS` despite selecting the oxidised topology. The builder therefore produced the
+intended SS state without a forced bond. The later `KeyError: 'OUT'` was reporting-only.
+
+The tree was quarantined under `G93A_INVALID_2SH_20260913` before the false-negative diagnosis
+was corrected. That name is inaccurate; inventory its window/run directories before deciding
+whether to resume. Do not analyse a partial tree or resubmit until that inventory is recorded.
 
 The diagnostic was pre-registered and signed off by the user 2026-09-12; config is staged on
 branch `diag/g93a-ss` (never to be merged). Everything below — baseline, endpoint, and all
 five outcome readings — was written and committed (`6d3926f`, `5430dac`) before the smoke
-attempt, so the interpretation cannot be adjusted to the result. The failed topology build
-did not produce a valid SS window or a scientific endpoint.
+attempt, so the interpretation cannot be adjusted to the result. The smoke established a
+valid SS topology but did not produce a scientific endpoint.
 
 > **The automated checks cannot see this experiment.** The full test suite passes unchanged
 > (105 passed, 12 skipped) with `keep_disulfide_reduced: false`, and the protocol fingerprint is
@@ -133,8 +137,8 @@ comparability with the 1.17 baseline. Three config values change, not one.
 
 ## 7. Procedure
 
-This is the procedure as pre-registered. Execution stopped at step 3 because the topology
-gate failed. Step 4 is now disabled; retain the remainder as the historical intended protocol.
+This is the procedure as pre-registered. Execution was stopped after a false-negative topology
+report. Step 4 remains paused until the quarantined production-window inventory is known.
 
 ```bash
 # ---- 0. on the SCC, from the repo root ------------------------------------------
@@ -173,22 +177,19 @@ python -m src.fep.window --variant G93A --leg folded --window 0 --rep 0 --smoke 
 #   smoke-hash window left in results/fep/G93A/folded/ would make _check_single_protocol
 #   reject the whole variant later.
 
-# The guard is DISABLED in this arm (keep_disulfide_reduced: false), so this grep is the
-# ONLY verification that the topology is what we intend. Check the file the guard would
-# have read, and check BOTH directions:
+# The reduced-state guard is disabled in this arm. Verify the direct SG-SG bond and HG
+# pattern; residue-name grep is invalid because GROMACS preserves the label CYS here:
 T=results/fep/G93A/folded/system_r0/hybrid.top
-grep -n "CYS2\|CYX" "$T"          # expect the C57/C146 pair present -> the bond formed
-grep -c "CYS2\|CYX" "$T"          # necessary but NOT sufficient on its own
-#   Then confirm no SPURIOUS bond: SOD1 has four cysteines (6, 57, 111, 146). Only 57-146
-#   may be bridged; C6 and C111 must remain free thiols with HG. If C6 or C111 appear as
-#   CYS2/CYX, pdb2gmx has over-bonded and the run is invalid -- STOP.
+python -m src.fep.pmx_engine --inspect-system results/fep/G93A/folded/system_r0
+# expect actual SG-SG bonds [(57, 146)] and HG only on residues 6 and 111 in both
+# pdb2gmx topologies and hybrid.top.
 
 # Clean up: --smoke stamps the run dir with a DIFFERENT protocol hash, so the array's real
 # w0_r0 task would hit assert_resumable and refuse. Remove the run dir; keep the system dir
 # (identical either way, and rebuilding costs time).
 rm -rf results/fep/G93A/folded/w0_r0
 
-# ---- 4. the array -- DISABLED AFTER THE FAILED TOPOLOGY GATE -------------------
+# ---- 4. the array -- PAUSED PENDING QUARANTINED-TREE INVENTORY -----------------
 mkdir -p logs/fep
 # DO NOT RUN: qsub -v VARIANT=G93A scripts/submit_array.sh
 

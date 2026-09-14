@@ -237,10 +237,10 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   keep_disulfide_reduced: false
                           # ^^ DIAGNOSTIC BRANCH diag/g93a-ss ONLY -- NEVER MERGE TO MAIN.
                           # false omits interactive '-ss', avoiding an unanswered-prompt hang.
-                          # The original 2026-09-13 name-based gate reported no bridge, but a
-                          # later atom-list inspection found HG absent from C57/C146. The state
-                          # is unresolved pending an actual SG-SG bond-directive check. Do not
-                          # submit on residue labels alone.
+                          # The original 2026-09-13 name-based gate falsely reported no bridge.
+                          # Direct inspection found the C57-C146 SG-SG bond in both pdb2gmx
+                          # topologies and after gentop, with HG only on C6/C111. The builder
+                          # works; never infer state from CYS2/CYX labels alone.
                           # structure.disulfide stays 'reduced' -- setting it to 'oxidized'
                           # ABORTS the build (src/prep/build.py:187).
                           # See docs/prereg_g93a_disulfide_diagnostic.md.

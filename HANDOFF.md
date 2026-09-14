@@ -6,12 +6,13 @@ Read `README.md` for the scientific design and `CLAUDE.md` for the operating rul
 file is only: where things stand, what to do next, and what not to break.
 
 > **URGENT DIAGNOSTIC STATUS — 2026-09-13:** On branch `diag/g93a-ss`, the original
-> SS smoke gate reported `bridged: []`, but it inferred bonding from residue labels alone.
-> A later inspection found C57/C146 lack HG while C6/C111 retain it, consistent with the
-> intended SS state despite every printed label remaining `CYS`; active `specbond.dat` is
-> correct. Do **not** resubmit until the actual SG-SG bond directive is verified. The gate
-> now checks the direct bond and HG pattern rather than CYS2/CYX names. `KeyError: 'OUT'`
-> was reporting-only.
+> `bridged: []` smoke verdict was a false negative from checking CYS2/CYX labels. Direct
+> inspection shows the actual C57-C146 SG-SG bond in both pdb2gmx topologies and after
+> `pmx gentop`; only C57/C146 lack HG, and the SG distance stays ~2.03-2.04 Å. The builder
+> therefore made the intended SS topology without forcing a bond. The tree was already
+> quarantined as `G93A_INVALID_2SH_20260913`; inventory it before deciding whether to resume,
+> and do not analyse partial output. The gate now checks the actual bond plus HG pattern.
+> `KeyError: 'OUT'` was reporting-only.
 
 > **Read [`docs/stop_rule_reanalysis.md`](docs/stop_rule_reanalysis.md) first (2026-09-12).**
 > Every documented estimate below has now been re-derived from the raw archived windows and
