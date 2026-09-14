@@ -1,7 +1,13 @@
 # Pre-registration — G93A disulfide diagnostic (SS vs 2SH)
 
-**Status: TOPOLOGY GATE PASSED ON RECHECK (2026-09-13); PRODUCTION STATUS PENDING.** The
-original smoke report said `bridged: []`, `free thiol: [6, 57, 111, 146]`, but that checker
+**Status: COMPLETE — CONVERGED NEGATIVE RESULT (2026-09-14).** All 120 production windows
+passed the inventory and protocol checks, and all three independently built folded systems
+passed the physical topology gate: C57-C146 is directly bonded, C57/C146 lack HG, and C6/C111
+retain HG. The primary folded-state shift is **−0.0169 kcal/mol**, inside the pre-registered
+`|Δ| < 0.3` negligible band. The disulfide state therefore does not materially change G93A's
+folded mutation cost and does not explain the calculation's ~1.17 kcal/mol underprediction.
+
+The original smoke report said `bridged: []`, `free thiol: [6, 57, 111, 146]`, but that checker
 inferred state only from printed residue labels (`CYS2`/`CYX`). Direct inspection proved that
 verdict was a false negative: both pdb2gmx topologies and `pmx gentop` contain the actual
 C57-C146 SG-SG bond, C57/C146 lack HG, and only C6/C111 retain HG. All four coordinate stages
@@ -9,24 +15,22 @@ preserve the intended ~2.03-2.04 Å sulfur separation. GROMACS preserved the dis
 label `CYS` despite selecting the oxidised topology. The builder therefore produced the
 intended SS state without a forced bond. The later `KeyError: 'OUT'` was reporting-only.
 
-The tree was quarantined under `G93A_INVALID_2SH_20260913` before the false-negative diagnosis
-was corrected. Inventory on 2026-09-13 found **zero production NPZs**, no unfolded directory,
-and exactly one folded run directory: `w0_r0` carrying smoke-only protocol hash
-`0333c51a508e5140`. Thus no production array result exists to analyse or preserve; the tree
-contains the valid SS `system_r0` build plus a leftover smoke run directory. The array remains
-paused under the user's explicit instruction not to resubmit.
+The tree was initially quarantined under `G93A_INVALID_2SH_20260913` before the false-negative
+diagnosis was corrected. Its smoke-only `w0_r0` directory was separated, the valid `system_r0`
+was restored to a clean `results/fep/G93A` tree, and array 7565024 produced the complete
+diagnostic dataset. Before analysis, the inventory found exactly 120 expected NPZs, no missing
+or extra windows, shape `(20, 3001)` throughout, finite reduced potentials, provenance
+`gromacs_pmx`, and protocol `822108e9db71124d` in both legs.
 
 The diagnostic was pre-registered and signed off by the user 2026-09-12; config is staged on
 branch `diag/g93a-ss` (never to be merged). Everything below — baseline, endpoint, and all
 five outcome readings — was written and committed (`6d3926f`, `5430dac`) before the smoke
-attempt, so the interpretation cannot be adjusted to the result. The smoke established a
-valid SS topology but did not produce a scientific endpoint.
+attempt, so the interpretation cannot be adjusted to the result. The completed production
+run supplies that endpoint without changing the pre-declared reading.
 
-> **The automated checks cannot see this experiment.** The full test suite passes unchanged
-> (105 passed, 12 skipped) with `keep_disulfide_reduced: false`, and the protocol fingerprint is
-> byte-identical to the 2SH baseline (§5). Nothing in the repo will tell you which physical
-> state a window came from. The branch discipline (§7 step 2) and the MANIFEST (§7) are the
-> only provenance this arm has.
+> **The protocol fingerprint cannot identify this experiment.** It is byte-identical to the
+> 2SH baseline (§5), so the physical topology checks, branch discipline (§7 step 2), and
+> MANIFEST (§7) are the only redox-state provenance this arm has.
 
 ## 1. The question
 
@@ -43,7 +47,7 @@ and pivoted (r = 0.326 < 0.60); README §10 commits the project to a methods/lim
 
 ## 2. Design — one variable
 
-| | 2SH baseline (exists) | SS diagnostic (proposed) |
+| | 2SH baseline (exists) | SS diagnostic (completed) |
 |---|---|---|
 | variant | G93A | G93A |
 | protocol hash | `822108e9db71124d` | **`822108e9db71124d`** (verified identical, §5) |
@@ -75,6 +79,25 @@ tripeptide (ACE-G92-G93-A94-NME) containing no cysteine, so it is disulfide-free
 construction and cancels exactly. Comparing folded ΔG isolates the disulfide; comparing ΔΔG
 re-introduces unfolded-leg sampling noise (~0.1 kcal/mol) for nothing. ΔΔG is reported as a
 secondary, human-readable figure.
+
+### 3.1 Completed diagnostic result (2026-09-14)
+
+| | value |
+|---|---|
+| **folded ΔG (primary endpoint)** | r0 **+9.7768**, r1 **+9.7848**, r2 **+9.6862** — **mean +9.7493, sd 0.0547** |
+| **Δ vs frozen 2SH mean** | **−0.0169 kcal/mol** |
+| ΔΔG (secondary) | **1.2698 ± 0.0618 kcal/mol** (exp 2.43, error **−1.1602**) |
+| unfolded ΔG | +8.3970 / +8.5211 / +8.5203 |
+| maximum cycle closure | **0.1247 kcal/mol** |
+| minimum adjacent overlap | **0.030062** |
+| ΔΔG replicate spread | **0.2138 kcal/mol** |
+| topology | C57-C146 bond in folded `system_r0`, `system_r1`, and `system_r2` |
+
+The run meets the registered closure criterion and shows no overlap collapse. PyMBAR recorded
+one `hybr` solver fallback; the fallback converged to finite estimates and is retained in the
+diagnostics rather than treated as a failure. Under §4's pre-declared interpretation this is
+the first outcome: **the reference-state mismatch is documented but not quantitatively
+important for G93A ΔΔG.** There is no re-gate and no longer-sampling retry.
 
 ## 4. Pre-declared interpretation
 
@@ -123,7 +146,7 @@ edit. `prepare_variant` **hard-raises** unless `structure.form == "apo"` and
 `structure.disulfide == "reduced"` ([build.py:187](../src/prep/build.py#L187)), so setting it to
 `oxidized` does not produce the SS state — it aborts the build.
 
-The proposed SS state used a different route. Stage 1 calls `strip_disulfide_bonds`,
+The diagnostic SS state used a different route. Stage 1 calls `strip_disulfide_bonds`,
 which removes the SG–SG **bond from the OpenMM topology only** and does not touch coordinates
 ([build.py:117](../src/prep/build.py#L117)) — the two SG atoms stay at their crystal separation
 of ~2 Å. The pre-run hypothesis was that pdb2gmx would then re-detect C57-C146 by SG-SG
@@ -140,9 +163,10 @@ comparability with the 1.17 baseline. Three config values change, not one.
 
 ## 7. Procedure
 
-This is the procedure as pre-registered. Execution was stopped after a false-negative topology
-report. The quarantined-tree inventory is now known (zero production windows), but step 4
-remains paused until the user explicitly reverses the no-resubmit instruction.
+This is the procedure as pre-registered. Execution initially stopped after a false-negative
+topology report; after the physical topology recheck and explicit user authorization, array
+7565024 completed all 120 production windows. Step 4 is retained as history, not as permission
+to submit the diagnostic again.
 
 ```bash
 # ---- 0. on the SCC, from the repo root ------------------------------------------
@@ -193,9 +217,9 @@ python -m src.fep.pmx_engine --inspect-system results/fep/G93A/folded/system_r0
 # (identical either way, and rebuilding costs time).
 rm -rf results/fep/G93A/folded/w0_r0
 
-# ---- 4. the array -- PAUSED PENDING QUARANTINED-TREE INVENTORY -----------------
+# ---- 4. the array -- COMPLETED AS JOB 7565024; DO NOT RESUBMIT -----------------
 mkdir -p logs/fep
-# DO NOT RUN: qsub -v VARIANT=G93A scripts/submit_array.sh
+# Historical submission only: qsub -v VARIANT=G93A scripts/submit_array.sh
 
 # ---- 5. monitor ------------------------------------------------------------------
 echo "$(date +%H:%M) done: $(find results/fep/G93A -name 'w*_r*.npz' | wc -l)/120 | live: $(find results/fep/G93A -name prod.log -newermt '-2 minutes' | wc -l) | queue: $(qstat -u bodeb | grep -c sod1_fep)"
