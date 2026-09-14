@@ -121,9 +121,9 @@ Computed locally 2026-09-12 against the committed engine:
 - Flipping `keep_disulfide_reduced` **does not change the fingerprint**: the disulfide is a topology property, absent from the `.mdp`, and `protocol_extra()` carries only `independent_replicate_systems`. **The hash cannot witness this experiment** — §6 trap 2.
 - `_pdb2gmx_stdin()` returns `""` when the flag is false. The pre-run expectation was that
   omitting interactive `-ss` would let the default distance/specbond path form C57-C146.
-  It avoided the hang. Whether it also formed the bond was initially misreported because the
-  gate trusted residue labels; the HG pattern is consistent with SS, and the direct SG-SG
-  bond check is now required.
+  It avoided the hang, and direct bond inspection subsequently verified C57-C146 in both
+  pdb2gmx passes and after `pmx gentop`. The original gate misreported the state because it
+  trusted residue labels rather than the physical bond and HG pattern.
 - No gate variant's tripeptide contains Cys57 or Cys146 (closest: I149A at 148–150), confirming §3's cancellation argument.
 
 ## 6. Three traps that would make this measure nothing
@@ -151,8 +151,8 @@ which removes the SG–SG **bond from the OpenMM topology only** and does not to
 ([build.py:117](../src/prep/build.py#L117)) — the two SG atoms stay at their crystal separation
 of ~2 Å. The pre-run hypothesis was that pdb2gmx would then re-detect C57-C146 by SG-SG
 distance when interactive `-ss` was omitted. The original residue-name-only smoke check did
-not validly test that hypothesis. C57/C146 losing HG is consistent with detection; the direct
-SG-SG bond directive is the remaining decisive evidence.
+not validly test that hypothesis. The direct SG-SG bond directives in both pdb2gmx topologies
+and `hybrid.top`, together with the C57/C146 HG removal, subsequently proved it.
 
 Consequence: `structure.disulfide: reduced` remains correct and unchanged throughout this
 experiment, and the only config key touching redox is `fep.keep_disulfide_reduced`.
