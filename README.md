@@ -376,8 +376,9 @@ sod1-fep/
   the gate-of-record.
 
 ### Still open for closeout
-- **SCC archive verification:** confirm that live `results/fep/G93A` is the 2SH baseline
-  and that the SS diagnostic has a second SCC copy.
+- **SCC archive redundancy:** the live `results/fep/G93A` 2SH baseline was verified remotely
+  on 2026-09-14. Create and verify a second SCC copy of `G93A_SS_diagnostic`; the bounded
+  search found only its live results tree.
 - **Independent reproducibility check:** a second person should reproduce Table 3 and
   Figure 4 from the manifest and frozen inputs.
 - **Optional final artifact:** the evidence-locked outline and figure package are complete;

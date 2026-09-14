@@ -139,6 +139,10 @@ The separate local 2SH baseline remains at
 `~/sod1fep_archive_2026-09-11/fep/G93A/`, also complete at 120 NPZs. Its three folded
 topologies contain no SG–SG bond and retain HG on all four cysteines. This proves local archive
 separation and the identities of both trees. It does **not** prove that the live SCC directory
-was restored after the diagnostic or that the SS tree has a second SCC copy. A read-only SSH
-retry on 2026-09-14 reached `scc1.bu.edu` but failed authentication before any remote path could
-be read, so both checks remain explicitly open.
+was restored after the diagnostic or that the SS tree has a second SCC copy.
+
+**Remote follow-up, 2026-09-14:** the user confirmed that live SCC `results/fep/G93A` has
+120 NPZs and that all three folded `hybrid.top` files have SHA-256
+`ed830d0b5085113245f8c914437684b79cac624d8343c796839803bfb446a8b5`, matching the local 2SH
+archive. The baseline restoration is therefore verified. A bounded SCC search found only the
+live `results/fep/G93A_SS_diagnostic` tree, so the second SCC archive copy remains to be made.

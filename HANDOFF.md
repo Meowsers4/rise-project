@@ -115,15 +115,17 @@ Verified locally on 2026-09-14:
 - The two trees share the same protocol hash, so the manifest and physical topology—not the
   hash—identify redox state.
 
-**Still unverified remotely:** the user reported restored SCC access on 2026-09-14, but this
-agent execution environment has no forwarded credential: key-only access was rejected and the
-interactive path stopped at the password prompt. No remote path was read. In an authenticated
-SCC shell, compare each live `results/fep/G93A/folded/system_r*/hybrid.top` SHA-256 against the
-known 2SH value `ed830d0b5085113245f8c914437684b79cac624d8343c796839803bfb446a8b5` (the SS value is
-`9ce591304f918ac1fab989588d0f0b5d5768ded0cf71297dca4a1f480b17f7d8`) and confirm 120 live
-NPZs. Then locate a second `G93A_SS_diagnostic` tree outside the live results path and confirm
-its manifest and 120 NPZs. Do not submit anything merely to test access, and never share an SCC
-password with an agent.
+**Live baseline verified remotely 2026-09-14.** The user confirmed 120 NPZs under live
+`results/fep/G93A` and SHA-256
+`ed830d0b5085113245f8c914437684b79cac624d8343c796839803bfb446a8b5` for all three folded
+`hybrid.top` files. This matches the local 2SH archive (and differs from the SS topology hash
+`9ce591304f918ac1fab989588d0f0b5d5768ded0cf71297dca4a1f480b17f7d8`), so the live baseline
+restoration is closed.
+
+**Second SS copy still absent on the SCC.** A bounded search returned only the live
+`/projectnb/rise-batteries/bode/rise-project/results/fep/G93A_SS_diagnostic` tree. Make one
+non-overwriting archival copy, then confirm its manifest and 120 NPZs. This is archival work
+only; do not submit compute.
 
 ## CPU-only reproduction
 

@@ -122,8 +122,10 @@ redox mismatch is real but does not explain G93A's error.
 ## Remaining closeout work
 
 1. Have a second person reproduce Table 3 and Figure 4 from the archived inputs.
-2. Verify that live SCC `results/fep/G93A` is the 2SH baseline and that the SS diagnostic
-   tree has a second SCC copy. This is archival verification only; do not submit compute.
+2. Create and verify a second SCC copy of the SS diagnostic tree. The live SCC
+   `results/fep/G93A` 2SH baseline was verified remotely on 2026-09-14 (120 NPZs and all three
+   folded topology hashes match the local 2SH archive), but the bounded SCC search found only
+   the live SS diagnostic tree. This is archival work only; do not submit compute.
 3. If a submission-ready artifact is wanted, convert this evidence-locked outline into a
    polished report or manuscript. The LiveCoMS inquiry was parked by user direction on
    2026-09-14 and is not a prerequisite for closing the technical project.
