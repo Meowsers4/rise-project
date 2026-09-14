@@ -51,9 +51,9 @@ panel:
                             # "verified apo-monomer" -- that comment was wrong and was removed
                             # 2026-09-12. Kumar is a COMPILATION with no stated conditions; the
                             # upstream measurements are apo but disulfide-INTACT (we simulate
-                            # 2SH), and the G93S/G93V rows are DSC on the apo dimer, not the
-                            # monomer. See docs/reference_state_audit.md before treating any of
-                            # these as a like-for-like reference.
+                            # 2SH). G93S/G93V `exp_ddg` are whole-dimer apo DSC values at
+                            # 49.4 C, not monomer values at 25 C; `exp_ddg_dimer` holds the
+                            # corresponding holo-dimer values. See reference_state_audit.md.
   uncharacterized_csv: data/uncharacterized_variants.csv  # Route B input (variant,bucket,clinvar_id)
   target_size: 40           # v1 panel size (README suggests 30-50)
   min_positive_controls: 10 # gate power depends on control count+spread (D3); quality over count

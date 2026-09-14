@@ -87,7 +87,10 @@ Checked against `CLAUDE.md`'s forbidden framings and the review's list of withdr
 - Does **not** attribute the position-93 discrepancy to backbone entropy, or to anything.
 - Does **not** claim the experimental values are wrong. §4.1 of the audit closed that off: F64A's ΔG is measurably *above* its pWT reference.
 - Does **not** present the reference-state mismatch as the explanation of the gate failure. It cannot be — the residuals are site-dependent and a common reference offset is not.
-- Does **not** claim provenance it does not have: A4V's gate point is excluded from the re-derivation claim, and the two Stathopulos controls are marked provisional rather than verified. Both were overstated in the first draft and corrected 2026-09-12 — in a letter whose entire value is provenance, those are the two claims an editor could actually check.
+- Does **not** flatten incompatible provenance: the Stathopulos controls were verified
+  2026-09-14, but their copied numbers are whole-dimer apo/holo DSC values that Kumar labeled
+  apo-monomer/holo-dimer. Any revision must state that category error rather than treating all
+  eight gate values as one homogeneous monomer reference set.
 
 ## 3. Before sending — two things I could not settle
 

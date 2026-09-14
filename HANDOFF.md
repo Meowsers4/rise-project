@@ -16,6 +16,16 @@ file is only: where things stand, what to do next, and what not to break.
 > `G93A_SS_diagnostic` with its manifest, restore `G93A_2SH_baseline` to `G93A`, and leave
 > `diag/g93a-ss` without merging it. Full record: `docs/prereg_g93a_disulfide_diagnostic.md`.
 
+> **STATHOPULOS SOURCE CHECK COMPLETE — 2026-09-14:** Primary Tables 2/4 and Kumar's
+> supplementary Table S1 were checked directly. Kumar copied the numbers correctly but
+> misclassified the Stathopulos apo values as monomeric: G93S/G93V 3.7/7.0 are sign-flipped
+> **whole-dimer apo DSC** values at 49.4 °C; 3.1/5.4 are **holo-dimer** values at 87.2 °C.
+> Stathopulos's per-monomer apo effects are approximately 1.85/3.50. The construct is
+> C6A/C111S, the native C57–C146 disulfide is intact, and the buffer is pH 7.8. Do not alter or
+> re-score the preregistered gate with these post-verdict facts. Full record:
+> `docs/reference_state_audit.md` §5. Next scientific task: a separately labeled forensic
+> sensitivity analysis, then the apo-2SH versus apo-SS scope decision. **No GPU submission.**
+
 > **Read [`docs/stop_rule_reanalysis.md`](docs/stop_rule_reanalysis.md) first (2026-09-12).**
 > Every documented estimate below has now been re-derived from the raw archived windows and
 > reproduces to floating-point rounding, so the review's "unverified against raw output"
@@ -184,18 +194,19 @@ Pre-registered 2026-08-07, before any gate evaluation. **Never lower one to make
 1. **Reference-state mismatch — see [`docs/reference_state_audit.md`](docs/reference_state_audit.md)
    (2026-09-12), which supersedes the "suspect values" framing that stood here.** Every gate
    control was measured with the **Cys57–Cys146 disulfide intact**; we simulate the reduced
-   (2SH) form. Separately, G93S and G93V are **DSC measurements on the apo dimer**, not
-   apo-monomer as `variants.csv` labels them — which explains the "monomer > dimer" oddity
-   without impugning the measurements. A4V/G93A/I113T re-derive exactly from Lindberg 2005, so
-   the panel arithmetic is sound. **All six values with a reachable primary table now reproduce
-   exactly** (Lindberg 2005 and Nordlund & Oliveberg 2006, the latter closed 2026-09-12 via
-   PMC1502438). F64A's −0.20 is a real measured ΔG *above* pWT (3.07 vs 2.87), so "the
-   experiment is wrong" is no longer available; and I149A's apo monomer has negative absolute
-   stability (ΔG −1.18), making its 4.05 an extrapolation. Only G93S/G93V remain unchecked —
-   Stathopulos is not in PMC and needs the BU library.
+   (2SH) form. Separately, G93S and G93V are **whole-dimer DSC values at 49.4 °C**, not
+   apo-monomer values at 25 °C as Kumar/Table S1 and `variants.csv` label them. This was closed
+   against Stathopulos's primary Tables 2/4 on 2026-09-14: 3.7/7.0 are sign-flipped apo-dimer
+   totals, while the nominal "dimer" values 3.1/5.4 are actually holo-dimer totals. Per monomer,
+   the apo values are approximately 1.85/3.50. **All eight gate values now reproduce their
+   primary tables**, but the last two prove the compiled state/normalization is heterogeneous.
+   F64A's −0.20 is a real measured ΔG *above* pWT (3.07 vs 2.87), so "the experiment is wrong"
+   is no longer available; and I149A's apo monomer has negative absolute stability (ΔG −1.18),
+   making its 4.05 an extrapolation.
    **Do not drop a control because it produced an inconvenient FEP number** — that is the
    same category of post-hoc adjustment as lowering `min_pearson`. Check the primary
-   sources first, and write the argument down before any gate evaluation.
+   sources first, and write the argument down before any gate evaluation. The original gate
+   remains the gate-of-record; a per-monomer/25 °C recalculation is forensic sensitivity only.
 2. **No overlap floor among the gate criteria.** G93A passed every convergence check with
    a minimum adjacent overlap of 0.017 — indistinguishable from F64A's 0.018 — while being
    1.05 kcal/mol wrong. Adding a floor only *tightens*, so it is defensible against the
