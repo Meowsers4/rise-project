@@ -10,8 +10,11 @@ label `CYS` despite selecting the oxidised topology. The builder therefore produ
 intended SS state without a forced bond. The later `KeyError: 'OUT'` was reporting-only.
 
 The tree was quarantined under `G93A_INVALID_2SH_20260913` before the false-negative diagnosis
-was corrected. That name is inaccurate; inventory its window/run directories before deciding
-whether to resume. Do not analyse a partial tree or resubmit until that inventory is recorded.
+was corrected. Inventory on 2026-09-13 found **zero production NPZs**, no unfolded directory,
+and exactly one folded run directory: `w0_r0` carrying smoke-only protocol hash
+`0333c51a508e5140`. Thus no production array result exists to analyse or preserve; the tree
+contains the valid SS `system_r0` build plus a leftover smoke run directory. The array remains
+paused under the user's explicit instruction not to resubmit.
 
 The diagnostic was pre-registered and signed off by the user 2026-09-12; config is staged on
 branch `diag/g93a-ss` (never to be merged). Everything below — baseline, endpoint, and all
@@ -138,7 +141,8 @@ comparability with the 1.17 baseline. Three config values change, not one.
 ## 7. Procedure
 
 This is the procedure as pre-registered. Execution was stopped after a false-negative topology
-report. Step 4 remains paused until the quarantined production-window inventory is known.
+report. The quarantined-tree inventory is now known (zero production windows), but step 4
+remains paused until the user explicitly reverses the no-resubmit instruction.
 
 ```bash
 # ---- 0. on the SCC, from the repo root ------------------------------------------

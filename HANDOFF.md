@@ -10,9 +10,11 @@ file is only: where things stand, what to do next, and what not to break.
 > inspection shows the actual C57-C146 SG-SG bond in both pdb2gmx topologies and after
 > `pmx gentop`; only C57/C146 lack HG, and the SG distance stays ~2.03-2.04 Å. The builder
 > therefore made the intended SS topology without forcing a bond. The tree was already
-> quarantined as `G93A_INVALID_2SH_20260913`; inventory it before deciding whether to resume,
-> and do not analyse partial output. The gate now checks the actual bond plus HG pattern.
-> `KeyError: 'OUT'` was reporting-only.
+> quarantined as `G93A_INVALID_2SH_20260913`. Inventory found zero production NPZs, no
+> unfolded leg, and only folded `w0_r0` at smoke hash `0333c51a508e5140`; there is no array
+> result to analyse. The valid SS `system_r0` can be preserved, but the array remains paused
+> until the user explicitly reverses the no-resubmit instruction. The gate now checks the
+> actual bond plus HG pattern. `KeyError: 'OUT'` was reporting-only.
 
 > **Read [`docs/stop_rule_reanalysis.md`](docs/stop_rule_reanalysis.md) first (2026-09-12).**
 > Every documented estimate below has now been re-derived from the raw archived windows and
