@@ -1,9 +1,20 @@
 # HANDOFF — SOD1 FEP pipeline
 
-Written for an agent with **no prior context**. Updated 2026-08-30.
+Written for an agent with **no prior context**. Updated 2026-09-14.
 
 Read `README.md` for the scientific design and `CLAUDE.md` for the operating rules. This
 file is only: where things stand, what to do next, and what not to break.
+
+> **G93A SS DIAGNOSTIC COMPLETE — 2026-09-14:** All 120 windows passed inventory checks at
+> protocol `822108e9db71124d`, and the direct topology gate found C57-C146 in all three
+> independently built folded systems. The pre-registered primary endpoint is folded ΔG:
+> **9.7493 ± 0.0547 kcal/mol**, a shift of **−0.0169 kcal/mol** from the frozen 2SH mean
+> (9.7662). This is squarely inside the pre-declared `|Δ| < 0.3` negligible band: the
+> experimental/reference-state mismatch is real but does not explain G93A's ~1.17 kcal/mol
+> underprediction. Secondary ΔΔG is **1.2698 ± 0.0618 kcal/mol**; closure is 0.1247,
+> minimum adjacent overlap 0.030062, and the run is converged. Preserve the SS tree as
+> `G93A_SS_diagnostic` with its manifest, restore `G93A_2SH_baseline` to `G93A`, and leave
+> `diag/g93a-ss` without merging it. Full record: `docs/prereg_g93a_disulfide_diagnostic.md`.
 
 > **Read [`docs/stop_rule_reanalysis.md`](docs/stop_rule_reanalysis.md) first (2026-09-12).**
 > Every documented estimate below has now been re-derived from the raw archived windows and

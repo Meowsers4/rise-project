@@ -1,16 +1,36 @@
 # Pre-registration — G93A disulfide diagnostic (SS vs 2SH)
 
-**Status: PRE-REGISTERED. Signed off by the user 2026-09-12; config staged on branch
-`diag/g93a-ss` (never to be merged). No SS window has been run.** `CLAUDE.md` rule 1 required
-that sign-off because v1 is defined as the disulfide-reduced form. Everything below — baseline,
-endpoint, and all five outcome readings — was written and committed (`6d3926f`, `5430dac`)
-before any SS window existed, so the interpretation cannot be adjusted to the result.
+**Status: COMPLETE — CONVERGED NEGATIVE RESULT (2026-09-14).** All 120 production windows
+passed the inventory and protocol checks, and all three independently built folded systems
+passed the physical topology gate: C57-C146 is directly bonded, C57/C146 lack HG, and C6/C111
+retain HG. The primary folded-state shift is **−0.0169 kcal/mol**, inside the pre-registered
+`|Δ| < 0.3` negligible band. The disulfide state therefore does not materially change G93A's
+folded mutation cost and does not explain the calculation's ~1.17 kcal/mol underprediction.
 
-> **The automated checks cannot see this experiment.** The full test suite passes unchanged
-> (105 passed, 12 skipped) with `keep_disulfide_reduced: false`, and the protocol fingerprint is
-> byte-identical to the 2SH baseline (§5). Nothing in the repo will tell you which physical
-> state a window came from. The branch discipline (§7 step 2) and the MANIFEST (§7) are the
-> only provenance this arm has.
+The original smoke report said `bridged: []`, `free thiol: [6, 57, 111, 146]`, but that checker
+inferred state only from printed residue labels (`CYS2`/`CYX`). Direct inspection proved that
+verdict was a false negative: both pdb2gmx topologies and `pmx gentop` contain the actual
+C57-C146 SG-SG bond, C57/C146 lack HG, and only C6/C111 retain HG. All four coordinate stages
+preserve the intended ~2.03-2.04 Å sulfur separation. GROMACS preserved the displayed residue
+label `CYS` despite selecting the oxidised topology. The builder therefore produced the
+intended SS state without a forced bond. The later `KeyError: 'OUT'` was reporting-only.
+
+The tree was initially quarantined under `G93A_INVALID_2SH_20260913` before the false-negative
+diagnosis was corrected. Its smoke-only `w0_r0` directory was separated, the valid `system_r0`
+was restored to a clean `results/fep/G93A` tree, and array 7565024 produced the complete
+diagnostic dataset. Before analysis, the inventory found exactly 120 expected NPZs, no missing
+or extra windows, shape `(20, 3001)` throughout, finite reduced potentials, provenance
+`gromacs_pmx`, and protocol `822108e9db71124d` in both legs.
+
+The diagnostic was pre-registered and signed off by the user 2026-09-12; config is staged on
+branch `diag/g93a-ss` (never to be merged). Everything below — baseline, endpoint, and all
+five outcome readings — was written and committed (`6d3926f`, `5430dac`) before the smoke
+attempt, so the interpretation cannot be adjusted to the result. The completed production
+run supplies that endpoint without changing the pre-declared reading.
+
+> **The protocol fingerprint cannot identify this experiment.** It is byte-identical to the
+> 2SH baseline (§5), so the physical topology checks, branch discipline (§7 step 2), and
+> MANIFEST (§7) are the only redox-state provenance this arm has.
 
 ## 1. The question
 
@@ -27,7 +47,7 @@ and pivoted (r = 0.326 < 0.60); README §10 commits the project to a methods/lim
 
 ## 2. Design — one variable
 
-| | 2SH baseline (exists) | SS diagnostic (proposed) |
+| | 2SH baseline (exists) | SS diagnostic (completed) |
 |---|---|---|
 | variant | G93A | G93A |
 | protocol hash | `822108e9db71124d` | **`822108e9db71124d`** (verified identical, §5) |
@@ -60,6 +80,25 @@ construction and cancels exactly. Comparing folded ΔG isolates the disulfide; c
 re-introduces unfolded-leg sampling noise (~0.1 kcal/mol) for nothing. ΔΔG is reported as a
 secondary, human-readable figure.
 
+### 3.1 Completed diagnostic result (2026-09-14)
+
+| | value |
+|---|---|
+| **folded ΔG (primary endpoint)** | r0 **+9.7768**, r1 **+9.7848**, r2 **+9.6862** — **mean +9.7493, sd 0.0547** |
+| **Δ vs frozen 2SH mean** | **−0.0169 kcal/mol** |
+| ΔΔG (secondary) | **1.2698 ± 0.0618 kcal/mol** (exp 2.43, error **−1.1602**) |
+| unfolded ΔG | +8.3970 / +8.5211 / +8.5203 |
+| maximum cycle closure | **0.1247 kcal/mol** |
+| minimum adjacent overlap | **0.030062** |
+| ΔΔG replicate spread | **0.2138 kcal/mol** |
+| topology | C57-C146 bond in folded `system_r0`, `system_r1`, and `system_r2` |
+
+The run meets the registered closure criterion and shows no overlap collapse. PyMBAR recorded
+one `hybr` solver fallback; the fallback converged to finite estimates and is retained in the
+diagnostics rather than treated as a failure. Under §4's pre-declared interpretation this is
+the first outcome: **the reference-state mismatch is documented but not quantitatively
+important for G93A ΔΔG.** There is no re-gate and no longer-sampling retry.
+
 ## 4. Pre-declared interpretation
 
 Let **Δ = mean folded ΔG(SS) − 9.7662**, compared against the 2SH replicate sd of 0.1311.
@@ -80,7 +119,11 @@ Computed locally 2026-09-12 against the committed engine:
 
 - With `ns_per_window.folded: 3` and `equilibration_ns.folded: 0.5`, the folded fingerprint is **`822108e9db71124d`** — byte-identical to the G93A archive. Reverting those two values is necessary **and sufficient** for protocol comparability.
 - Flipping `keep_disulfide_reduced` **does not change the fingerprint**: the disulfide is a topology property, absent from the `.mdp`, and `protocol_extra()` carries only `independent_replicate_systems`. **The hash cannot witness this experiment** — §6 trap 2.
-- `_pdb2gmx_stdin()` ([pmx_engine.py:294](../src/fep/pmx_engine.py#L294)) returns `""` when the flag is false, so pdb2gmx falls back to its default and forms C57–C146 by SG–SG distance. The disulfide-free guard at [line 574](../src/fep/pmx_engine.py#L574) is gated by the same flag.
+- `_pdb2gmx_stdin()` returns `""` when the flag is false. The pre-run expectation was that
+  omitting interactive `-ss` would let the default distance/specbond path form C57-C146.
+  It avoided the hang, and direct bond inspection subsequently verified C57-C146 in both
+  pdb2gmx passes and after `pmx gentop`. The original gate misreported the state because it
+  trusted residue labels rather than the physical bond and HG pattern.
 - No gate variant's tripeptide contains Cys57 or Cys146 (closest: I149A at 148–150), confirming §3's cancellation argument.
 
 ## 6. Three traps that would make this measure nothing
@@ -103,13 +146,13 @@ edit. `prepare_variant` **hard-raises** unless `structure.form == "apo"` and
 `structure.disulfide == "reduced"` ([build.py:187](../src/prep/build.py#L187)), so setting it to
 `oxidized` does not produce the SS state — it aborts the build.
 
-The SS state is produced by a different route entirely. Stage 1 calls `strip_disulfide_bonds`,
+The diagnostic SS state used a different route. Stage 1 calls `strip_disulfide_bonds`,
 which removes the SG–SG **bond from the OpenMM topology only** and does not touch coordinates
 ([build.py:117](../src/prep/build.py#L117)) — the two SG atoms stay at their crystal separation
-of ~2 Å. pdb2gmx then re-detects disulfides **by SG–SG distance**, and with the `-ss` answers
-suppressed (`keep_disulfide_reduced: false` → `_pdb2gmx_stdin` returns `""`) it re-forms
-C57–C146 on its own. The SS arm is therefore the *inverse of the guard*: it works by declining
-to answer a prompt, not by declaring an oxidized state anywhere in config.
+of ~2 Å. The pre-run hypothesis was that pdb2gmx would then re-detect C57-C146 by SG-SG
+distance when interactive `-ss` was omitted. The original residue-name-only smoke check did
+not validly test that hypothesis. The direct SG-SG bond directives in both pdb2gmx topologies
+and `hybrid.top`, together with the C57/C146 HG removal, subsequently proved it.
 
 Consequence: `structure.disulfide: reduced` remains correct and unchanged throughout this
 experiment, and the only config key touching redox is `fep.keep_disulfide_reduced`.
@@ -120,7 +163,10 @@ comparability with the 1.17 baseline. Three config values change, not one.
 
 ## 7. Procedure
 
-Three config values, one tree move, one smoke test, one array.
+This is the procedure as pre-registered. Execution initially stopped after a false-negative
+topology report; after the physical topology recheck and explicit user authorization, array
+7565024 completed all 120 production windows. Step 4 is retained as history, not as permission
+to submit the diagnostic again.
 
 ```bash
 # ---- 0. on the SCC, from the repo root ------------------------------------------
@@ -159,24 +205,21 @@ python -m src.fep.window --variant G93A --leg folded --window 0 --rep 0 --smoke 
 #   smoke-hash window left in results/fep/G93A/folded/ would make _check_single_protocol
 #   reject the whole variant later.
 
-# The guard is DISABLED in this arm (keep_disulfide_reduced: false), so this grep is the
-# ONLY verification that the topology is what we intend. Check the file the guard would
-# have read, and check BOTH directions:
+# The reduced-state guard is disabled in this arm. Verify the direct SG-SG bond and HG
+# pattern; residue-name grep is invalid because GROMACS preserves the label CYS here:
 T=results/fep/G93A/folded/system_r0/hybrid.top
-grep -n "CYS2\|CYX" "$T"          # expect the C57/C146 pair present -> the bond formed
-grep -c "CYS2\|CYX" "$T"          # necessary but NOT sufficient on its own
-#   Then confirm no SPURIOUS bond: SOD1 has four cysteines (6, 57, 111, 146). Only 57-146
-#   may be bridged; C6 and C111 must remain free thiols with HG. If C6 or C111 appear as
-#   CYS2/CYX, pdb2gmx has over-bonded and the run is invalid -- STOP.
+python -m src.fep.pmx_engine --inspect-system results/fep/G93A/folded/system_r0
+# expect actual SG-SG bonds [(57, 146)] and HG only on residues 6 and 111 in both
+# pdb2gmx topologies and hybrid.top.
 
 # Clean up: --smoke stamps the run dir with a DIFFERENT protocol hash, so the array's real
 # w0_r0 task would hit assert_resumable and refuse. Remove the run dir; keep the system dir
 # (identical either way, and rebuilding costs time).
 rm -rf results/fep/G93A/folded/w0_r0
 
-# ---- 4. the array ---------------------------------------------------------------
+# ---- 4. the array -- COMPLETED AS JOB 7565024; DO NOT RESUBMIT -----------------
 mkdir -p logs/fep
-qsub -v VARIANT=G93A scripts/submit_array.sh        # 120 tasks, ~18 GPU-h
+# Historical submission only: qsub -v VARIANT=G93A scripts/submit_array.sh
 
 # ---- 5. monitor ------------------------------------------------------------------
 echo "$(date +%H:%M) done: $(find results/fep/G93A -name 'w*_r*.npz' | wc -l)/120 | live: $(find results/fep/G93A -name prod.log -newermt '-2 minutes' | wc -l) | queue: $(qstat -u bodeb | grep -c sod1_fep)"
