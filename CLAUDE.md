@@ -7,11 +7,11 @@ full design; this file is the short list of rules that must shape every action.
      they cost no context. Use them for notes to humans, not to Claude. -->
 
 ## What this project is
-A GPU-cluster pipeline computing ΔΔG of folding for SOD1 (UniProt P00441) variants
-via alchemical FEP, validated against experimental controls, to triage
-uncharacterized ALS variants. It is a hybrid methods/target computational-biophysics
-project. `config/pipeline.yaml` is the single source of parameters; `data/variants.csv`
-is the single source of truth for the panel.
+A completed GPU-cluster validation campaign for SOD1 (UniProt P00441) folding ΔΔG,
+now being reported as a methods-and-limitations study after its pre-registered gate
+failed. The current project does not triage uncharacterized variants. `config/pipeline.yaml`
+is the single source of historical run parameters; `data/variants.csv` is the single
+source of truth for the panel.
 
 ## Non-negotiable rules
 1. **Apo-first.** v1 simulates the apo, disulfide-reduced form. Do NOT switch to
@@ -36,20 +36,24 @@ is the single source of truth for the panel.
 4. **No parameters in code.** Read everything from `config/pipeline.yaml`. If a value
    is missing or `TODO`, ask the user rather than inventing a default.
 5. **Replicates and error bars are mandatory** for any free-energy result. A ΔΔG
-   without an uncertainty and a cycle-closure check is not a result. `fep.replicates`
-   is pending a 3 → 5 raise (README §9). Do NOT raise it while an array is in flight:
+   without an uncertainty and a cycle-closure check is not a result. The former plan
+   to raise `fep.replicates` from 3 → 5 was retired with the GPU campaign on 2026-09-14;
+   do not change it now. If a future project explicitly reopens compute, never raise it
+   while an array is in flight:
    every task re-reads this config and `submit_array.sh` aborts when
    `legs*windows*replicates` disagrees with `SGE_TASK_LAST`. Raise it between arrays;
    r3/r4 are then additive (80 new tasks per variant at 20 windows), not a rerun — the
    protocol hash is identical at 3 and 5 replicates, so existing windows stay valid.
    `#$ -t` must go 120 → 200 in the SAME commit.
-6. **Four claims are load-bearing** (README §2.3): C1 charge-changing coverage,
-   C2 apo-2SH convergence, C3 DMS-independent VUS triage, C4 concordance/discordance.
-   Weakening one is a scope change needing the user's sign-off, not a refactor. Two
-   consequences bind day-to-day work: convergence diagnostics must be **written at run
-   time** to `results/convergence/<variant>.json` (C2 cannot be claimed retroactively
-   from uninstrumented runs), and charge-changing variants are no longer merely deferred
-   — covering them is the project's strongest methods claim. Never write "first",
+6. **The approved scope pivot is a contract.** The original C1–C4 claims are
+   preserved in README §2.3 as project history. On 2026-09-14 the user explicitly
+   approved retaining apo-2SH, ending the current GPU campaign, and retiring C1
+   (charge-changing coverage) and C3 (DMS-independent VUS triage). Because there
+   will be no VUS prediction campaign, C4 is deferred and must not be claimed. C2
+   remains only as a methods-and-limitations result about apo-2SH convergence
+   diagnostics; do not describe the failed gate as successful predictive validation.
+   Expanding this scope, starting an apo-SS campaign, or submitting new FEP/MD GPU
+   arrays requires a new explicit decision and preregistration. Never write "first",
    "novel FEP protocol", or "we show SOD1 variants are destabilizing": all three are
    occupied by Wells 2021, which used **this same toolchain** (README §11.2).
 

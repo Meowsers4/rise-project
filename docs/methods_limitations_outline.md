@@ -125,6 +125,9 @@ redox mismatch is real but does not explain G93A's error.
    Editor and inquiry route are verified; the letter remains unsent and contains explicit
    author/expertise/stewardship placeholders.
 2. Have a second person reproduce Table 3 and Figure 4 from the archived inputs.
+3. Once SCC access is restored, verify that live `results/fep/G93A` is the 2SH baseline and
+   that the SS diagnostic tree has a second SCC copy. This is archival verification only;
+   do not submit compute.
 
 Figures 1--3 and 5 are built by [`methods_figures.py`](../src/analysis/methods_figures.py);
 the archived-input contract and exact reproduction command are in

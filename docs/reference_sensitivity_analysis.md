@@ -91,7 +91,7 @@ to reference normalization and temperature treatment at the two highest-leverage
 The gate-of-record measured calculation error plus benchmark heterogeneity; it cannot identify
 their separate contributions.
 
-## 4. Reference-state recommendation made concrete — sign-off pending
+## 4. Approved reference-state scope
 
 The evidence now supports one bounded path for the current project:
 
@@ -104,10 +104,11 @@ The evidence now supports one bounded path for the current project:
    apo-2SH controls.** If a sufficiently large matched set cannot be assembled, the honest
    alternative is a separately designed apo-SS campaign—not silently mixing the two states.
 
-This is a recommendation, not a recorded decision. Ending the present campaign would retire
-load-bearing claims C1 and C3 and therefore requires explicit user sign-off under `CLAUDE.md`
-rule 6. Switching v1 to apo-SS is likewise a user-approved scope change under rule 1. Until
-one path is approved, no new GPU submission should be made.
+The user explicitly approved this path on 2026-09-14. The current project therefore retains
+apo-2SH, ends GPU work, and retires C1 and C3. Because no VUS prediction campaign will be
+performed, C4 is deferred and is not a current claim. This approval is not authorization for
+an apo-SS campaign; any future predictive campaign requires a new matched benchmark,
+preregistration, and explicit approval. The original gate verdict remains unchanged.
 
 ## 5. Reproduction
 

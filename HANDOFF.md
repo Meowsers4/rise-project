@@ -1,17 +1,16 @@
 # HANDOFF — SOD1 FEP pipeline
 
-Updated 2026-09-14 after the reference sensitivity analysis and methods figure package. The
-reference-state scope recommendation is awaiting explicit user sign-off. Read
+Updated 2026-09-14 after explicit user approval of the reference-state scope decision. Read
 [`CLAUDE.md`](CLAUDE.md) first; it is the operating rulebook. Read [`README.md`](README.md)
 for the scientific design.
 
 ## Stop condition
 
-**No new GPU submission while the scope decision is pending.** This is a safety hold, not an
-approved termination of claims C1 or C3. The validation gate is finished and failed; the
-attempt-2 sampling test and G93A SS diagnostic are also finished. Do not submit A4V, repeat the
-diagnostic, or start VUS/charge-changing work without the explicit scope decision required by
-`CLAUDE.md` rule 6.
+**No new GPU submission.** On 2026-09-14 the user explicitly approved retaining apo-2SH,
+ending the current GPU campaign, and retiring C1 and C3. C4 is deferred and not claimed because
+there will be no VUS prediction campaign. The validation gate, attempt-2 sampling test, and
+G93A SS diagnostic are finished. An apo-SS campaign or any new FEP/MD array requires a new
+explicit decision and preregistration.
 
 Gate of record: **Pearson r = 0.326, RMSE = 2.123 kcal/mol, n = 7; failed on Pearson and
 RMSE; pivot triggered.** F64A was the sole excluded point because closure 1.1038 exceeded
@@ -26,7 +25,7 @@ Primary records:
   sampling test; precision improved ~5×, accuracy only 9%.
 - [`docs/reference_state_audit.md`](docs/reference_state_audit.md) — primary-source audit.
 - [`docs/reference_sensitivity_analysis.md`](docs/reference_sensitivity_analysis.md) —
-  frozen-prediction CPU sensitivity and current scope recommendation.
+  frozen-prediction CPU sensitivity and approved scope decision.
 - [`docs/prereg_g93a_disulfide_diagnostic.md`](docs/prereg_g93a_disulfide_diagnostic.md) —
   completed negative SS test.
 
@@ -88,7 +87,7 @@ prove cancellation for the other mutations.
 
 ## Reference-state scope
 
-The bounded recommendation awaiting explicit user sign-off is:
+The scope decision approved by the user on 2026-09-14 is:
 
 1. **Retain apo-2SH and stop GPU work.** It remains the biologically motivated state and the
    single SS diagnostic gives no basis for switching the campaign.
@@ -98,10 +97,9 @@ The bounded recommendation awaiting explicit user sign-off is:
    benchmark before new predictions. If an adequate matched set cannot be assembled, a
    separate apo-SS campaign is the alternative and needs explicit user approval.
 
-Adopting item 1 ends the planned paths to C1 and C3, so it is not a resolved decision. Leave
-`CLAUDE.md`'s four-claim contract unchanged until the user approves that consequence. Changing
-v1 to apo-SS is also a scope change; do not make either choice in config or by submission while
-the decision is pending.
+This decision retires C1 and C3. C4 is deferred and must not be claimed because C3 will not
+produce VUS FEP inputs. C2 remains only as a methods-and-limitations result; the failed gate is
+not successful predictive validation. The decision does not authorize changing v1 to apo-SS.
 
 ## Archive status
 
@@ -168,7 +166,8 @@ The LiveCoMS presubmission inquiry remains **drafted but not sent** in
 [`docs/livecoms_inquiry.md`](docs/livecoms_inquiry.md). It now includes the closed source audit
 and negative SS result. The current Lessons Learned Lead Editor and email route were verified
 2026-09-14; the user must fill the identity, expertise, and maintenance-stewardship placeholders
-and review the bounded scope before sending. Never send it autonomously.
+and approve the proposed license/update plan before sending. The bounded scope was approved
+2026-09-14. Never send the inquiry autonomously.
 
 ## Things not to do
 

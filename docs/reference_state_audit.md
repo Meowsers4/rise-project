@@ -17,11 +17,11 @@ a category error in the compilation: 3.70 and 7.00 kcal/mol are whole-dimer apo 
 49.4 °C, not apo-monomer values at 25 °C. The problem is the state and normalization, not a
 transcription error. See §5.
 
-This remains a **scope conflict awaiting explicit user sign-off**. The bounded recommendation
-is to retain apo-2SH, report the state mismatch, and stop the present GPU campaign, but adopting
-that recommendation would retire load-bearing claims C1 (charge-changing coverage) and C3
-(uncharacterized-variant triage). Rule 6 therefore prevents treating it as resolved. No
-protocol parameter, panel value, gate verdict, or claim contract has been changed. See §7.
+This scope conflict was **resolved by explicit user sign-off on 2026-09-14**. The project
+retains apo-2SH, reports the state mismatch, ends the present GPU campaign, and retires C1
+(charge-changing coverage) and C3 (uncharacterized-variant triage). With no VUS prediction
+campaign, C4 is deferred and not claimed. The sign-off does not authorize an apo-SS campaign.
+No protocol parameter, panel value, or gate verdict has been changed. See §7.
 
 ---
 
@@ -269,16 +269,15 @@ separate the two.
 Both are corrected in the same commit as this document. Note the pair is instructive: one file
 under-claimed and one over-claimed the *same* citation, and the gate ran on it for a month.
 
-## 7. Scope decision awaiting sign-off and remaining reference limitations
+## 7. Approved scope decision and remaining reference limitations
 
-1. **Simulated state vs measured state — recommendation only.** The evidence supports retaining
-   apo-2SH rather than switching the campaign on the strength of one negative G93A SS test. The
-   proposed path is to report the completed gate as an apo-2SH calculation compared with a
-   heterogeneous apo-SS benchmark, stop the present GPU campaign, and require a new,
-   pre-registered matched apo-2SH benchmark before future prediction. If that benchmark cannot
-   be assembled, apo-SS is a separate campaign. **This path is not adopted until the user signs
-   off on retiring C1 and C3 or supplies a different plan.** Until then, GPU submission is on
-   hold; the hold is not a claim-scope decision.
+1. **Simulated state vs measured state — resolved for the current project.** On 2026-09-14 the
+   user approved retaining apo-2SH rather than switching the campaign on the strength of one
+   negative G93A SS test. Report the completed gate as an apo-2SH calculation compared with a
+   heterogeneous apo-SS benchmark, end the present GPU campaign, and require a new,
+   pre-registered matched apo-2SH benchmark before any future prediction. If that benchmark
+   cannot be assembled, apo-SS would be a separate campaign requiring new explicit approval.
+   C1 and C3 are retired; C4 is deferred and not claimed.
 2. **Free cysteines.** The Lindberg and Nordlund controls are C6A/C111A; the Stathopulos
    controls are C6A/C111S. We simulate wild-type C6 and C111. Same class of issue, smaller
    magnitude, and it interacts with (1): the substitutions exist precisely to stop the free
@@ -330,10 +329,9 @@ flip. What fails is Kumar's apo-monomer label, not the numeric transcription.
 
 ## 9. Next
 
-1. **Obtain explicit scope sign-off.** The current recommendation is to retain apo-2SH, end the
-   present GPU campaign, and require a new matched benchmark before any future predictive
-   campaign. Adopting it would retire C1 and C3, so `CLAUDE.md` remains unchanged until the user
-   approves that consequence. Preserve the original gate as the gate-of-record.
+1. **Scope sign-off completed 2026-09-14.** Retain apo-2SH, end the present GPU campaign, and
+   require a new matched benchmark before any future predictive campaign. C1 and C3 are
+   retired; C4 is deferred and not claimed. Preserve the original gate as the gate-of-record.
 2. ~~Run a clearly labeled **forensic sensitivity analysis** using the Stathopulos
    normalization and 25 °C values.~~ **Completed 2026-09-14:** see
    [`reference_sensitivity_analysis.md`](reference_sensitivity_analysis.md). It preserves the

@@ -1,14 +1,15 @@
 # SOD1 Variant Stability Pipeline
 
-A GPU-cluster pipeline that computes protein-stability changes (ΔΔG of folding)
-for a panel of clinically observed **SOD1** variants using rigorous **alchemical
-free-energy (FEP/TI)** calculations, validated against experimentally measured
-controls, then extended to interpret uncharacterized ALS variants.
+A completed GPU-cluster validation campaign for protein-stability changes (ΔΔG of
+folding) in clinically observed **SOD1** variants using **alchemical free-energy
+(FEP/TI)** calculations. The failed gate stopped the planned extension to
+uncharacterized ALS variants; the project is now a methods-and-limitations study.
 
-> **Status:** compute running. Framework resolved (GROMACS + pmx). Novelty position
-> resolved 2026-08-07 after a literature audit — see [§2.3](#23-novelty-contract-read-before-writing-any-claim)
-> and [§11](#11-prior-art-and-novelty-position). **The framing of this project changed
-> as a result of that audit.** An agent picking this up must read §2.3 and §11 before
+> **Status (2026-09-14):** the pre-registered validation gate failed (Pearson
+> *r* = 0.326; RMSE = 2.123 kcal/mol). By explicit user decision, the project
+> retains apo-2SH, ends the current GPU campaign, retires charge-changing coverage
+> and uncharacterized-variant triage, and proceeds as a methods-and-limitations
+> deliverable. No new GPU submission is authorized. Read §2.3 and §11 before
 > writing any abstract, poster, or paper claim.
 
 ---
@@ -23,39 +24,37 @@ If you are an agent resuming work on this project:
    variants destabilize" — that was published in 2021 by Wells et al. using the
    *same toolchain*. Read [§11](#11-prior-art-and-novelty-position) for what is
    dead, what survives, and what the defensible claim now is.
-3. **Four claims are load-bearing.** They are listed in [§2.3](#23-novelty-contract-read-before-writing-any-claim).
-   If a design change would weaken one of them, that is a scope change requiring
-   the user's sign-off, not a refactor.
-4. **Check [§9 Open decisions](#9-open-decisions)** — some are resolved, some are
-   newly opened by the audit. The newly opened ones block the VUS stage, not the
-   control stage.
+3. **The 2026-09-14 scope pivot is binding.** See [§2.3](#23-claim-contract-and-approved-pivot):
+   C1 and C3 are retired, C4 is deferred and not claimed, and C2 survives only as
+   a methods-and-limitations result.
+4. **No new GPU work is authorized.** The remaining work is analysis, archival
+   verification, and preparation of the methods-and-limitations deliverable.
 5. **Changelog is [§12](#12-changelog).** Append to it; don't rewrite history.
 
 ---
 
 ## 1. What this project is (and is not)
 
-**Goal:** produce a validated ΔΔG map across the SOD1 variant landscape that flags
-which uncharacterized variants are likely destabilizing (and therefore plausibly
-pathogenic) and which are not — and, critically, to position that map as a
-*physics-based, training-data-free, DMS-independent line of evidence* that can be
-compared against orthogonal evidence classes.
+**Original goal:** produce a validated ΔΔG map across the SOD1 variant landscape.
+The validation gate did not support that use. The approved current goal is to
+report the failed gate, sampling/convergence diagnostics, benchmark chain of
+custody, reference-state sensitivity, and the negative G93A disulfide diagnostic
+as a reproducible methods-and-limitations study.
 
-This is a **hybrid methods/target** project:
+This is now a **methods/target limitations** project:
 - *Target:* SOD1 (Cu/Zn superoxide dismutase, UniProt **P00441**), a 153-residue
   soluble homodimer implicated in familial ALS.
-- *Method question:* can FEP-on-a-cluster reliably triage clinical variants when
-  benchmarked against known experimental stabilities — **including the
-  charge-changing variants that prior SOD1 FEP work explicitly excluded?**
+- *Method question:* what do the failed predictive gate, convergence diagnostics,
+  and reference-state mismatch show about apo-2SH SOD1 stability FEP?
 
-**In scope:** structure prep, empirical prescreen, alchemical ΔΔG, mechanism MD,
-validation, variant classification, concordance analysis against orthogonal
-evidence, cluster orchestration.
+**In scope now:** reproducible analysis of completed control calculations,
+benchmark/reference-state audit, the G93A disulfide negative test, archival
+verification, and a methods-and-limitations deliverable.
 
-**Out of scope (for v1):** wet-lab work, holo/metal-bound simulations (see
-[§4.1](#41-apo-first-decision)), ligand docking, ML surrogate models as a
-*contribution* (they appear only as comparators). These are possible later arms,
-not the first deliverable.
+**Out of scope for the current project:** new GPU FEP/MD, charge-changing support,
+VUS prediction/classification, concordance claims, wet-lab work, and holo/metal-
+bound or apo-SS campaigns. A later arm requires a new explicit scope decision and
+preregistration.
 
 ---
 
@@ -90,16 +89,23 @@ experimental ΔΔG** of the characterized controls (A4V, G93A, G37R, …).
 - The control-reproduction result is itself a presentable outcome — and under the
   revised framing, it is a *primary* deliverable, not a preamble.
 
-### 2.3 Novelty contract (read before writing any claim)
+### 2.3 Claim contract and approved pivot
 
-Four claims are load-bearing. Everything else is supporting material.
+The original four claims remain recorded for chain of custody. After the failed
+validation gate and reference-state audit, the user approved this scope pivot on
+2026-09-14. Downstream sections describing charge-changing or VUS stages are
+historical design notes; this decision governs wherever they conflict.
 
-| # | Claim | Status | Killed by |
-|---|-------|--------|-----------|
-| **C1** | Extension to **charge-changing** variants that Wells 2021 excluded | Strongest surviving methods claim | Dropping charge-changing variants from the panel; failing to implement net-charge corrections |
-| **C2** | **Convergence of apo-2SH** where Wells reported non-convergence | Strong, directly checkable | Not logging per-window convergence diagnostics; insufficient sampling |
-| **C3** | **Prospective, DMS-independent VUS triage** | Survives fully; engine-agnostic | Axakova 2025 already resolving the same VUS — must verify intersection |
-| **C4** | **Concordance/discordance analysis** vs DMS + FoldX/Rosetta/ML | Survives fully; the most interesting content | Reporting only agreement and burying disagreements |
+| # | Original claim | Status after sign-off |
+|---|---|---|
+| **C1** | Extension to **charge-changing** variants that Wells 2021 excluded | **Retired.** No charge-changing implementation or GPU work in the current project. |
+| **C2** | **Convergence of apo-2SH** where Wells reported non-convergence | **Retained only as a methods-and-limitations result.** Report the diagnostics, failed predictive gate, and reference-state caveats; do not claim validated predictive convergence. |
+| **C3** | **Prospective, DMS-independent VUS triage** | **Retired.** No VUS FEP predictions or classifications in the current project. |
+| **C4** | **Concordance/discordance analysis** vs DMS + FoldX/Rosetta/ML | **Deferred and not claimed.** It has no current-project FEP input once C3 is retired. |
+
+The current load-bearing output is the reproducible benchmark audit,
+convergence/uncertainty diagnostics, reference-state sensitivity analysis, and
+negative G93A disulfide test.
 
 **Do not write "first," "novel FEP protocol," or "we show SOD1 variants are
 destabilizing."** All three are false. See [§11.2](#112-what-is-dead).
@@ -194,7 +200,11 @@ scales linearly with GPU count.
 - Validate these against controls too — if FoldX can't reproduce known cases,
   you learn it cheaply.
 
-### Stage 3 — Alchemical ΔΔG (the cluster workhorse) ★
+### Stage 3 — Alchemical ΔΔG (historical design; GPU campaign ended) ★
+
+The items below document the original plan and completed implementation. The
+2026-09-14 decision retired C1 and ended GPU work; they are not instructions to
+submit further arrays.
 - Thermodynamic cycle: run the alchemical mutation (X→Y) in the **folded protein**
   and in an **unfolded reference** (solvated capped tripeptide). Difference of the
   two legs = ΔΔG_folding.
@@ -220,7 +230,7 @@ scales linearly with GPU count.
   running estimate must be persisted for every job. C2 cannot be claimed
   retroactively from results that weren't instrumented.
 
-### Stage 4 — Unbiased MD for mechanism (complementary)
+### Stage 4 — Unbiased MD for mechanism (retired from current scope)
 - FEP gives a number; MD gives the story. Run longer replicate plain-MD on the
   subset FEP flags as interesting — prioritize **discordant** variants from Stage 5
   (where FEP and DMS disagree), since those are where mechanism is most informative.
@@ -229,7 +239,10 @@ scales linearly with GPU count.
 - **Caveat:** do not expect full unfolding in accessible timescales — read proxies
   and equilibrium shifts, not a complete denaturation event.
 
-### Stage 5 — Validation, triage, and concordance
+### Stage 5 — Validation, triage, and concordance (closed after gate failure)
+
+The gate was evaluated and failed. The frozen rules below remain as design
+history; the approved scope does not proceed to charge or VUS stages.
 - **GATE:** correlate computed FEP ΔΔG vs experimental controls against the
   pre-registered thresholds in §2.2. Go/no-go.
 - **Head-to-head:** report the Wells-10 subset separately. Same target, same engine,
@@ -330,12 +343,16 @@ sod1-fep/
 4. **M2** — empirical prescreen + ML comparators over all variants; ranked table.
 5. **M3** — FEP runs for the control set; **validation gate** evaluated against
    pre-registered thresholds. Charge-changing sub-gate evaluated separately.
-   *(No further compute until this gate passes.)*
+   **Completed: gate failed; no further compute.** The charge-changing sub-gate was
+   retired before implementation.
 6. **M3.5** — Wells-10 head-to-head reported; convergence diagnostics for apo-2SH
-   assembled. **Claim C2 stands or falls here.**
-7. **M4** — FEP extended to uncharacterized variants; ΔΔG map produced.
-8. **M5** — concordance table built; discordant variants identified.
-9. **M6** — mechanism MD on discordant subset; final report + figures.
+   assembled. **Current methods-and-limitations deliverable.**
+7. ~~**M4** — FEP extended to uncharacterized variants; ΔΔG map produced.~~
+   **Retired with C3.**
+8. ~~**M5** — concordance table built; discordant variants identified.~~
+   **Deferred; C4 is not claimed.**
+9. ~~**M6** — mechanism MD on discordant subset.~~ **Retired.** Final report and
+   figures proceed using the completed control, audit, and diagnostic evidence.
 
 ---
 
@@ -345,29 +362,26 @@ sod1-fep/
 - ~~FEP framework~~ → **GROMACS + pmx** (see §2.4).
 - ~~λ-window count~~ → **20** (18 until `927b302`, which refined the endpoint; the changelog
   entry for 2026-08-07 records the superseded value of 18 and is left as history).
-  ~~Replicate count~~ → **3 in `config/pipeline.yaml` today.** README resolved this at 5 and
-  that raise is still pending — see `CLAUDE.md` rule 5, which requires `#$ -t` to go 120 → 200
-  in the same commit. **`config/pipeline.yaml` is the source of truth, not this line.**
+  ~~Replicate count~~ → **3 in `config/pipeline.yaml`.** The former 3 → 5 plan was retired
+  when the GPU campaign ended on 2026-09-14. **Do not change config or array bounds.**
 
-### Newly opened by the 2026-08-07 audit (these block claims, not compute)
-- **Charge-changing handling:** co-alchemical counterion vs Rocklin-type post-hoc
-  correction? Which charge-changing controls have experimental ΔΔG to validate
-  against? **Blocks C1.**
+### Retired or deferred by the 2026-09-14 approved pivot
+- **Charge-changing handling:** not selected or implemented. C1 is retired.
 - **Axakova intersection:** exactly how many of the target VUS does Axakova 2025
   already resolve? The panel currently assumes ~38 VUS; Axakova reports 156 SOD1
   missense variants in ClinVar of which ~26% (~41) are VUS, and provides evidence
-  for 41% of previously-reported VUS. **If most of the panel is already resolved,
-  drop the "reclassification" framing entirely and go all-in on C4 concordance.**
-  **Blocks C3.**
-- **Gate threshold values:** fix the hysteresis bound in `config/pipeline.yaml`
-  before the first gate evaluation, so it is pre-registered rather than
-  post-hoc.
+  for 41% of previously-reported VUS. **C3 is retired and C4 is deferred, so this
+  is not current-project work.**
+- **Gate threshold values:** were frozen before evaluation; the gate failed and remains
+  the gate-of-record.
 
-### Still open
-- **GPU count / partition names / walltime limits** on the target cluster.
-- **Panel size for v1:** how many variants (≈30–50 suggested)?
-- **Monomer vs dimer default**, and the per-variant rule for choosing.
-- **Starting PDB** (which structure, which resolution).
+### Still open for closeout
+- **SCC archive verification:** confirm that live `results/fep/G93A` is the 2SH baseline
+  and that the SS diagnostic has a second SCC copy.
+- **LiveCoMS inquiry:** fill author identity, expertise, and stewardship fields; approve
+  the license/update plan; then send manually.
+- **Independent reproducibility check:** a second person should reproduce Table 3 and
+  Figure 4 from the manifest and frozen inputs.
 
 ### Closed — do not reopen
 - **Alternative target fallback (TTR):** **rejected.** TTR FEP/TI stability is
@@ -386,7 +400,7 @@ these should stop and surface it rather than proceeding.
 
 | Trigger | Response |
 |---|---|
-| Gate Pearson r < 0.60, or large hysteresis | **Do not extend to VUS.** Pivot fully to a methods/sampling limits paper — a rigorous negative result on apo-2SH convergence is publishable (MLSB-appropriate). |
+| Gate Pearson r < 0.60, or large hysteresis | **Triggered and adopted 2026-09-14.** Do not extend to VUS; proceed with the methods/sampling-limits deliverable. |
 | Axakova already confidently classifies most target VUS | Drop "reclassification" framing. Go all-in on C4: physics-vs-DMS-vs-ML concordance and discordance. |
 | apo-2SH won't converge within GPU budget | Make convergence *the* paper. Restrict biological claims to folded/holo states. C2 becomes the whole contribution, stated as a limit. |
 | Charge-changing sub-gate fails | Withhold all charge-changing VUS results. C1 is unsupported; report the failure honestly — it corroborates Wells' reason for excluding them. |
@@ -460,25 +474,23 @@ Do not claim any of the following. Each is anticipated:
   [10.3390/ijms26157414](https://doi.org/10.3390/ijms26157414), reclassifying
   p.Val120Leu as pathogenic).
 
-### 11.3 What survives as novelty
+### 11.3 What remains defensible after the failed gate
 
-- ✅ **C1 — charge-changing variants.** Wells explicitly excluded them. No SOD1 FEP
-  study has covered them. Strongest surviving *methods* claim, and it is
-  engine-compatible with pmx.
-- ✅ **C2 — apo-2SH convergence.** Wells reported non-convergence. Same engine,
-  equilibrium windowed MBAR instead of fast-growth, 5 replicates, longer sampling →
-  a direct, apples-to-apples resolution of a limitation the prior authors named
-  themselves. Being on pmx *strengthens* this claim rather than weakening it.
-- ✅ **C3 — prospective, DMS-independent VUS triage.** No FEP-based SOD1 VUS
-  adjudication has been published. Engine-agnostic; survives fully. *(Caveat: this
-  is an absence-of-evidence finding across current-literature searches — strong but
-  not absolute. State it as such.)*
-- ✅ **C4 — concordance/discordance.** FEP is physics-based and training-data-free,
-  so it is methodologically independent of both DMS and of ML predictors trained on
-  ΔΔG datasets. Agreement across independent evidence classes is legitimate
-  ACMG-style multi-line evidence; disagreement is mechanistically informative.
-  Neither Wells nor Axakova occupies this position.
-- ✅ **Panel scale.** 54 experimental controls vs Wells' 10.
+- **C1 — retired.** Charge-changing variants remain an interesting future methods
+  problem, but this project did not implement or validate them and makes no claim.
+- **C2 — methods-and-limitations only.** Wells reported apo-2SH non-convergence. This
+  project can report its equilibrium-window diagnostics, failed predictive gate,
+  and the limited effect of extending A4V sampling. It cannot claim that it resolved
+  apo-2SH prediction or validated the method.
+- **C3 — retired.** No prospective VUS FEP triage or classification will be reported.
+- **C4 — deferred and not claimed.** Without VUS FEP outputs there is no preregistered
+  concordance analysis to perform.
+- **Benchmark/audit contribution.** The reproducible chain-of-custody audit exposes a
+  heterogeneous experimental anchor, including whole-dimer G93S/G93V measurements,
+  while preserving the original failed gate as the gate-of-record.
+- **Negative diagnostic contribution.** Restoring the G93A disulfide shifted folded
+  ΔG by only −0.017 kcal/mol, ruling out that single explanation for G93A's error
+  without generalizing to other variants.
 
 ### 11.4 The orthogonal-evidence landscape
 
@@ -508,31 +520,36 @@ Do not claim any of the following. Each is anticipated:
 
 ### 11.5 Competition framing (STS / ISEF / MIT URTC / PSB / MLSB)
 
-Judges reward defensible rigor and a crisp "what is new and how do I know it's
-right" narrative over scale. "We validated a physics method against 54 controls
-then applied it to VUS" is **solid but not, by itself, differentiated**, because
-the Smith and Plotkin groups already did SOD1 FEP and Axakova may already answer
-many of the same VUS experimentally.
+Judges reward defensible rigor and a crisp "what did the test establish?" narrative
+over scale. Do not say the method was validated, do not imply that it was applied
+prospectively to VUS, and do not turn benchmark heterogeneity into an excuse for
+the failed gate.
 
-Lead with, in this order:
+For the current methods-and-limitations deliverable, lead with:
 
-1. **The limitation you resolve.** "Prior SOD1 FEP work using this same toolchain
-   reported non-convergence in the apo state and excluded charge-changing variants.
-   We address both." Concrete, checkable, and survives cross-examination because
-   the prior authors named the limitations themselves.
-2. **Orthogonality.** Physics-based, training-data-free evidence independent of DMS
-   and of ML predictors. This is the sophisticated framing and it is defensible.
-3. **Failure analysis.** Where and why cheap predictors fail on SOD1, benchmarked
-   against FEP and DMS. This is the natural MLSB/PSB angle.
+1. **The pre-registered negative result.** The predictive validation gate failed,
+   and the project stopped rather than extending to VUS.
+2. **The failure analysis.** Separate sampling precision from reference-state and
+   benchmark heterogeneity without claiming that either alone explains the error.
+3. **Reproducibility.** Preserve frozen predictions, audited references, manifests,
+   figures, and the negative disulfide diagnostic so another person can regenerate
+   the central results.
 
-Anticipate the killer question — *"didn't Axakova already do this experimentally?"* —
-and have the answer ready: DMS measures cellular abundance and enzymatic function;
-FEP measures thermodynamic folding stability directly. They are different
-observables, and the cases where they diverge are the interesting ones.
+The strongest bounded message is procedural: a preregistered gate prevented a
+failed control model from being promoted into confident variant predictions, and
+the follow-up diagnostics narrowed what did and did not explain that failure.
 
 ---
 
 ## 12. Changelog
+
+### 2026-09-14 — failed-gate pivot approved
+- User explicitly approved retaining apo-2SH and ending the current GPU campaign.
+- C1 and C3 retired; C4 deferred and not claimed; C2 bounded to a
+  methods-and-limitations result rather than predictive validation.
+- The gate-of-record remains Pearson *r* = 0.326 and RMSE = 2.123 kcal/mol.
+- Any apo-SS or future predictive campaign now requires a matched benchmark, new
+  preregistration, and explicit approval.
 
 ### 2026-08-07 — literature audit; framework resolution; reframing
 - **Framework resolved:** GROMACS + pmx (was: open between OpenMM+Perses,
@@ -554,17 +571,17 @@ observables, and the cases where they diverge are the interesting ones.
 - New `variants.csv` columns required: `charge_change`, `wells2021`,
   `axakova_class`. New milestones M0.5 and M3.5.
 
-### Open verification debts
+### Historical verification debts (not current-project blockers)
 - Wells 2021 full text not directly retrievable; variant roster and protocol
   reconstructed from search-index snippets. **Verify against the PDF before citing.**
-- Axakova ∩ target-VUS intersection not computed variant-by-variant. The "~38 VUS"
-  figure must be reconciled with Axakova's ~41 (26% of 156). **Blocks C3.**
+- Axakova ∩ target-VUS intersection was not computed variant-by-variant. C3 was
+  subsequently retired, so this is no longer a current-project blocker.
 - "No published FEP-based SOD1 VUS reclassification" is absence of evidence across
   current-literature searches. Strong, not absolute. State as such in any manuscript.
 
 ---
 
-## 13. References to gather (for the agent to populate)
+## 13. References for any future scope expansion
 
 - Wells 2021 PDF — verify variant roster, λ protocol, trajectory lengths, and
   whether 0.81 is Pearson or R².

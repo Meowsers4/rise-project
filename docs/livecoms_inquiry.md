@@ -95,10 +95,12 @@ Verified 2026-09-14:
 Before sending, the user still needs to:
 
 1. replace all bracketed identity, expertise, and maintenance-stewardship fields;
-2. confirm the bounded scope statement: completed v1 remains apo-2SH with no more GPU work;
-3. decide whether the proposed annual/update-triggered maintenance plan and CC BY 4.0 license
+2. decide whether the proposed annual/update-triggered maintenance plan and CC BY 4.0 license
    are acceptable;
-4. trim or reformat after inserting identity details if the rendered letter exceeds one page.
+3. trim or reformat after inserting identity details if the rendered letter exceeds one page.
+
+The bounded scope is confirmed by explicit user approval on 2026-09-14: completed v1 remains
+apo-2SH with no more GPU work.
 
 ## 4. Status
 
