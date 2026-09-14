@@ -236,12 +236,12 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
   # guard: pdb2gmx is told every cysteine is a free thiol.
   keep_disulfide_reduced: false
                           # ^^ DIAGNOSTIC BRANCH diag/g93a-ss ONLY -- NEVER MERGE TO MAIN.
-                          # false suppresses the pdb2gmx '-ss' answers, so pdb2gmx re-detects
-                          # C57-C146 by SG-SG distance and forms it: this is the ONLY way the
-                          # SS state is produced. structure.disulfide stays 'reduced' -- setting
-                          # it to 'oxidized' ABORTS the build (src/prep/build.py:187).
-                          # It also disables assert_topology_disulfide_free, so the smoke-test
-                          # grep of system_r0/hybrid.top is the only verification that exists.
+                          # false omits interactive '-ss', avoiding an unanswered-prompt hang.
+                          # The 2026-09-13 smoke test proved that omission alone does NOT form
+                          # C57-C146 in this two-pass build; the diagnostic is stopped at its
+                          # topology gate pending coordinate/specbond inspection. Do not submit.
+                          # structure.disulfide stays 'reduced' -- setting it to 'oxidized'
+                          # ABORTS the build (src/prep/build.py:187).
                           # See docs/prereg_g93a_disulfide_diagnostic.md.
   lambda_protocol: default     # unused by the GROMACS path (kept for the perses engine)
   unfolded_reference: tripeptide_native  # ACE-[i-1][i][i+1]-NME, neighbors from the WT structure

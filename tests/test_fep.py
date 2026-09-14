@@ -432,6 +432,30 @@ def test_disulfide_prompt_count_covers_all_cysteine_pairs():
         pdb.unlink(missing_ok=True)
 
 
+def test_cysteine_geometry_report_identifies_both_pdb2gmx_inputs(tmp_path):
+    """The SS diagnostic must inspect coordinates, not infer a bond from config."""
+    from src.fep.pmx_engine import cysteine_geometry_report
+
+    system = tmp_path / "system_r0"
+    system.mkdir()
+    (system / "wt.pdb").write_text(
+        "ATOM      1  SG  CYS A  57     -18.871  -0.035  28.480  1.00  0.00           S  \n"
+        "ATOM      2  HG  CYS A  57     -18.000  -0.100  28.400  1.00  0.00           H  \n"
+        "ATOM      3  SG  CYS A 146     -17.105  -0.882  29.043  1.00  0.00           S  \n"
+        "ATOM      4  HG  CYS A 146     -16.400  -0.900  29.100  1.00  0.00           H  \n"
+    )
+
+    report = cysteine_geometry_report(system)
+
+    assert "pdb2gmx pass 1 INPUT" in report
+    assert "pdb2gmx pass 2 INPUT" in report
+    assert "A: 57 CYS   SG" in report
+    assert "A:146 CYS   SG" in report
+    assert "d(A:57-A:146) = 2.038 A" in report
+    assert "pdb2gmx pass 1: wt_discard.top MISSING" in report
+    assert "pdb2gmx pass 2: topol.top MISSING" in report
+
+
 def test_mdrun_retries_a_busy_gpu_but_not_a_blown_up_system(monkeypatch, tmp_path):
     """CUDA #46 is transient contention; a LINCS explosion is not.
 
@@ -909,12 +933,13 @@ def test_run_pmx_window_uses_THIS_leg_schedule_for_both_mdp_and_discard(monkeypa
     assert f_sched["discard"] != u_sched["discard"]
 
 
-def test_ss_flag_is_omitted_when_the_disulfide_is_wanted():
-    """`-ss` is interactive selection; omitting it lets pdb2gmx auto-detect the bond.
+def test_ss_flag_is_omitted_to_avoid_an_unanswered_interactive_prompt():
+    """`-ss` is interactive selection; it cannot be passed with empty stdin.
 
     Passing `-ss` with no stdin answers does not produce a wrong topology -- it HANGS,
     because pdb2gmx blocks on a prompt nobody answers. That is what happened on the first
-    end-to-end run of the SS diagnostic. Guard both directions.
+    end-to-end run of the SS diagnostic. Omission did not ultimately form the bond, so
+    this test covers process interaction only, not the required topology verdict.
     """
     from src.fep.pmx_engine import _pdb2gmx_stdin, _ss_argv
 

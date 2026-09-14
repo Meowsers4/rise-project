@@ -304,18 +304,17 @@ def _pdb2gmx_stdin(cfg: dict, n_cysteines: int) -> str:
 
 
 def _ss_argv(cfg: dict) -> list[str]:
-    """``-ss`` only when we intend to DECLINE disulfides.
+    """Control only whether ``pdb2gmx`` uses interactive SS selection.
 
     ``-ss`` switches pdb2gmx to *interactive* SS-bond selection; its default is automatic
     detection by SG-SG distance. The reduced form is enforced by turning that prompt on and
     answering "n" to every pair (:func:`_pdb2gmx_stdin`).
 
-    When ``fep.keep_disulfide_reduced`` is false the automatic detection is exactly what we
-    want -- Stage 1 stripped the topology bond but left the SG atoms ~2 A apart, so pdb2gmx
-    re-forms C57-C146 on its own. Passing ``-ss`` in that case is a HANG, not a wrong
-    answer: ``_pdb2gmx_stdin`` returns "" and pdb2gmx blocks on a prompt that never gets a
-    reply. Found 2026-09-13 on the first end-to-end run of the SS path, which sat in the
-    queue for hours doing nothing.
+    Passing ``-ss`` with no answers is a HANG, not a request for automatic selection.
+    Omitting it avoids that hang and asks GROMACS to use its distance/specbond machinery,
+    but the 2026-09-13 smoke test proved that omission alone did NOT create C57-C146 in
+    this two-pass pmx build. The SS diagnostic remains stopped at its topology gate; this
+    helper does not imply that the resulting topology is oxidised.
     """
     return ["-ss"] if cfg["fep"].get("keep_disulfide_reduced", True) else []
 
@@ -378,6 +377,112 @@ def assert_topology_disulfide_free(top: Path, gro: Path) -> None:
             f"{gro}: cysteine residues {missing} have SG but no HG -- they are bridged, "
             "not reduced. v1 simulates the disulfide-reduced form."
         )
+
+
+def cysteine_geometry_report(system: Path) -> str:
+    """Report cysteine SG coordinates through both ``pdb2gmx`` passes.
+
+    This is deliberately diagnostic only: coordinates and residue names can explain why
+    special-bond detection did or did not fire, but this function never edits a structure
+    or topology. PDB coordinates are already Angstrom; GRO coordinates are converted from
+    nm so all four stages can be compared directly.
+    """
+    import itertools
+    import math
+
+    def pdb_atoms(path: Path) -> list[tuple[str, int, str, str, tuple[float, ...]]]:
+        atoms = []
+        for line in path.read_text().splitlines():
+            if not line.startswith(("ATOM  ", "HETATM")):
+                continue
+            try:
+                xyz = tuple(float(line[i:i + 8]) for i in (30, 38, 46))
+                resid = int(line[22:26])
+            except ValueError:
+                continue
+            atoms.append((line[21:22].strip() or "-", resid, line[17:20].strip(),
+                          line[12:16].strip(), xyz))
+        return atoms
+
+    def gro_atoms(path: Path) -> list[tuple[str, int, str, str, tuple[float, ...]]]:
+        atoms = []
+        for line in path.read_text().splitlines()[2:-1]:
+            if len(line) < 44:
+                continue
+            try:
+                xyz = tuple(10.0 * float(line[i:i + 8]) for i in (20, 28, 36))
+                resid = int(line[0:5])
+            except ValueError:
+                continue
+            atoms.append(("-", resid, line[5:10].strip(), line[10:15].strip(), xyz))
+        return atoms
+
+    lines = [
+        "The two pdb2gmx inputs are wt.pdb (pass 1) and hybrid.pdb (pass 2).",
+        "wt_gmx.pdb and conf.gro are their respective outputs. Distances are Angstrom.",
+    ]
+    for label, name, parser in (
+        ("pdb2gmx pass 1 INPUT ", "wt.pdb", pdb_atoms),
+        ("pdb2gmx pass 1 OUTPUT", "wt_gmx.pdb", pdb_atoms),
+        ("pdb2gmx pass 2 INPUT ", "hybrid.pdb", pdb_atoms),
+        ("pdb2gmx pass 2 OUTPUT", "conf.gro", gro_atoms),
+    ):
+        path = system / name
+        lines.append(f"\n{label}: {path}")
+        if not path.exists():
+            lines.append("  MISSING")
+            continue
+        atoms = parser(path)
+        sg = [a for a in atoms if a[3] == "SG"]
+        atom_names = {(a[0], a[1]): set() for a in sg}
+        for chain, resid, _resname, atom, _xyz in atoms:
+            if (chain, resid) in atom_names:
+                atom_names[(chain, resid)].add(atom)
+        for chain, resid, resname, _atom, xyz in sg:
+            has_hg = "yes" if "HG" in atom_names[(chain, resid)] else "no"
+            lines.append(
+                f"  {chain}:{resid:3d} {resname:5s} SG "
+                f"({xyz[0]:8.3f}, {xyz[1]:8.3f}, {xyz[2]:8.3f})  HG={has_hg}"
+            )
+        for a, b in itertools.combinations(sg, 2):
+            lines.append(
+                f"    d({a[0]}:{a[1]}-{b[0]}:{b[1]}) = {math.dist(a[4], b[4]):.3f} A"
+            )
+
+    lines.append("\nCysteine residue states in the generated topologies:")
+    for label, name in (
+        ("pdb2gmx pass 1", "wt_discard.top"),
+        ("pdb2gmx pass 2", "topol.top"),
+        ("pmx gentop      ", "hybrid.top"),
+    ):
+        path = system / name
+        if not path.exists():
+            lines.append(f"  {label}: {name} MISSING")
+            continue
+        residues: dict[int, dict[str, set[str]]] = {}
+        section = ""
+        for raw in path.read_text().splitlines():
+            clean = raw.split(";", 1)[0].strip()
+            if clean.startswith("[") and clean.endswith("]"):
+                section = clean.strip("[] ").lower()
+                continue
+            if section != "atoms":
+                continue
+            fields = clean.split()
+            if len(fields) < 5 or not fields[0].isdigit() or not fields[2].isdigit():
+                continue
+            resid, resname, atom = int(fields[2]), fields[3], fields[4]
+            if resname.upper().startswith(("CYS", "CYX")):
+                entry = residues.setdefault(resid, {"names": set(), "atoms": set()})
+                entry["names"].add(resname)
+                entry["atoms"].add(atom)
+        summary = ", ".join(
+            f"{resid}:{'/'.join(sorted(state['names']))}:HG="
+            f"{'yes' if 'HG' in state['atoms'] else 'no'}"
+            for resid, state in sorted(residues.items())
+        )
+        lines.append(f"  {label}: {summary or 'NO CYSTEINE-LIKE RESIDUES FOUND'}")
+    return "\n".join(lines)
 
 
 _CAPS = frozenset({"ACE", "NME", "NAC", "NH2"})
@@ -1177,12 +1282,18 @@ def main() -> None:
     p = argparse.ArgumentParser(description="GROMACS+pmx engine checks (Stage 3).")
     p.add_argument("--config", default=str(ROOT / "config" / "pipeline.yaml"))
     p.add_argument("--verify", action="store_true", help="check gmx/pmx/force field only")
+    p.add_argument("--inspect-system", type=Path,
+                   help="report Cys SG geometry through an existing system build")
     p.add_argument("--dry-run", action="store_true", help="print the command sequence")
     p.add_argument("--variant", default="A4V")
     p.add_argument("--leg", default="folded")
     p.add_argument("--window", type=int, default=0)
     p.add_argument("--rep", type=int, default=0)
     args = p.parse_args()
+
+    if args.inspect_system:
+        print(cysteine_geometry_report(args.inspect_system))
+        return
 
     cfg = load_config(args.config)
     if args.verify:

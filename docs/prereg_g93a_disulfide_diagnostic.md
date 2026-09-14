@@ -1,10 +1,18 @@
 # Pre-registration — G93A disulfide diagnostic (SS vs 2SH)
 
-**Status: PRE-REGISTERED. Signed off by the user 2026-09-12; config staged on branch
-`diag/g93a-ss` (never to be merged). No SS window has been run.** `CLAUDE.md` rule 1 required
-that sign-off because v1 is defined as the disulfide-reduced form. Everything below — baseline,
-endpoint, and all five outcome readings — was written and committed (`6d3926f`, `5430dac`)
-before any SS window existed, so the interpretation cannot be adjusted to the result.
+**Status: STOPPED AT THE TOPOLOGY GATE (2026-09-13).** The smoke build produced no
+C57-C146 bridge: `bridged: []`, `free thiol: [6, 57, 111, 146]`. It is another invalid 2SH
+attempt, not an SS result. Omitting `-ss` fixed the unanswered-prompt hang but did not make
+automatic special-bond detection create the bridge. Do not submit or resubmit the array.
+Inspect `wt.pdb`, `wt_gmx.pdb`, `hybrid.pdb`, `conf.gro`, and the active `specbond.dat`
+before choosing a construction fix; do not force a topology bond blindly. The later
+`KeyError: 'OUT'` was only a smoke-script reporting bug after this verdict.
+
+The diagnostic was pre-registered and signed off by the user 2026-09-12; config is staged on
+branch `diag/g93a-ss` (never to be merged). Everything below — baseline, endpoint, and all
+five outcome readings — was written and committed (`6d3926f`, `5430dac`) before the smoke
+attempt, so the interpretation cannot be adjusted to the result. The failed topology build
+did not produce a valid SS window or a scientific endpoint.
 
 > **The automated checks cannot see this experiment.** The full test suite passes unchanged
 > (105 passed, 12 skipped) with `keep_disulfide_reduced: false`, and the protocol fingerprint is
@@ -80,7 +88,10 @@ Computed locally 2026-09-12 against the committed engine:
 
 - With `ns_per_window.folded: 3` and `equilibration_ns.folded: 0.5`, the folded fingerprint is **`822108e9db71124d`** — byte-identical to the G93A archive. Reverting those two values is necessary **and sufficient** for protocol comparability.
 - Flipping `keep_disulfide_reduced` **does not change the fingerprint**: the disulfide is a topology property, absent from the `.mdp`, and `protocol_extra()` carries only `independent_replicate_systems`. **The hash cannot witness this experiment** — §6 trap 2.
-- `_pdb2gmx_stdin()` ([pmx_engine.py:294](../src/fep/pmx_engine.py#L294)) returns `""` when the flag is false, so pdb2gmx falls back to its default and forms C57–C146 by SG–SG distance. The disulfide-free guard at [line 574](../src/fep/pmx_engine.py#L574) is gated by the same flag.
+- `_pdb2gmx_stdin()` returns `""` when the flag is false. **Pre-run expectation, falsified
+  by the 2026-09-13 smoke:** omitting interactive `-ss` was expected to let the default
+  distance/specbond path form C57-C146. It avoided the hang but produced four free thiols.
+  The disulfide-free guard is gated by the same flag, so the external topology gate caught it.
 - No gate variant's tripeptide contains Cys57 or Cys146 (closest: I149A at 148–150), confirming §3's cancellation argument.
 
 ## 6. Three traps that would make this measure nothing
@@ -103,13 +114,13 @@ edit. `prepare_variant` **hard-raises** unless `structure.form == "apo"` and
 `structure.disulfide == "reduced"` ([build.py:187](../src/prep/build.py#L187)), so setting it to
 `oxidized` does not produce the SS state — it aborts the build.
 
-The SS state is produced by a different route entirely. Stage 1 calls `strip_disulfide_bonds`,
+The proposed SS state used a different route. Stage 1 calls `strip_disulfide_bonds`,
 which removes the SG–SG **bond from the OpenMM topology only** and does not touch coordinates
 ([build.py:117](../src/prep/build.py#L117)) — the two SG atoms stay at their crystal separation
-of ~2 Å. pdb2gmx then re-detects disulfides **by SG–SG distance**, and with the `-ss` answers
-suppressed (`keep_disulfide_reduced: false` → `_pdb2gmx_stdin` returns `""`) it re-forms
-C57–C146 on its own. The SS arm is therefore the *inverse of the guard*: it works by declining
-to answer a prompt, not by declaring an oxidized state anywhere in config.
+of ~2 Å. The pre-run hypothesis was that pdb2gmx would then re-detect C57-C146 by SG-SG
+distance when interactive `-ss` was omitted. **The smoke falsified that construction
+hypothesis:** the pair remained free. The intended state still must be created in the GROMACS
+topology rather than by changing `structure.disulfide`, but the safe mechanism is unresolved.
 
 Consequence: `structure.disulfide: reduced` remains correct and unchanged throughout this
 experiment, and the only config key touching redox is `fep.keep_disulfide_reduced`.
@@ -120,7 +131,8 @@ comparability with the 1.17 baseline. Three config values change, not one.
 
 ## 7. Procedure
 
-Three config values, one tree move, one smoke test, one array.
+This is the procedure as pre-registered. Execution stopped at step 3 because the topology
+gate failed. Step 4 is now disabled; retain the remainder as the historical intended protocol.
 
 ```bash
 # ---- 0. on the SCC, from the repo root ------------------------------------------
@@ -174,9 +186,9 @@ grep -c "CYS2\|CYX" "$T"          # necessary but NOT sufficient on its own
 # (identical either way, and rebuilding costs time).
 rm -rf results/fep/G93A/folded/w0_r0
 
-# ---- 4. the array ---------------------------------------------------------------
+# ---- 4. the array -- DISABLED AFTER THE FAILED TOPOLOGY GATE -------------------
 mkdir -p logs/fep
-qsub -v VARIANT=G93A scripts/submit_array.sh        # 120 tasks, ~18 GPU-h
+# DO NOT RUN: qsub -v VARIANT=G93A scripts/submit_array.sh
 
 # ---- 5. monitor ------------------------------------------------------------------
 echo "$(date +%H:%M) done: $(find results/fep/G93A -name 'w*_r*.npz' | wc -l)/120 | live: $(find results/fep/G93A -name prod.log -newermt '-2 minutes' | wc -l) | queue: $(qstat -u bodeb | grep -c sod1_fep)"
