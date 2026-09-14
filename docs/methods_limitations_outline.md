@@ -119,15 +119,14 @@ redox mismatch is real but does not explain G93A's error.
 - No claim that the combined sensitivity row passes validation.
 - No claim that SS mismatch explains the gate failure.
 
-## Remaining CPU-only work
+## Remaining closeout work
 
-1. User-complete and review [`livecoms_inquiry.md`](livecoms_inquiry.md). The current Lead
-   Editor and inquiry route are verified; the letter remains unsent and contains explicit
-   author/expertise/stewardship placeholders.
-2. Have a second person reproduce Table 3 and Figure 4 from the archived inputs.
-3. Once SCC access is restored, verify that live `results/fep/G93A` is the 2SH baseline and
-   that the SS diagnostic tree has a second SCC copy. This is archival verification only;
-   do not submit compute.
+1. Have a second person reproduce Table 3 and Figure 4 from the archived inputs.
+2. Verify that live SCC `results/fep/G93A` is the 2SH baseline and that the SS diagnostic
+   tree has a second SCC copy. This is archival verification only; do not submit compute.
+3. If a submission-ready artifact is wanted, convert this evidence-locked outline into a
+   polished report or manuscript. The LiveCoMS inquiry was parked by user direction on
+   2026-09-14 and is not a prerequisite for closing the technical project.
 
 Figures 1--3 and 5 are built by [`methods_figures.py`](../src/analysis/methods_figures.py);
 the archived-input contract and exact reproduction command are in

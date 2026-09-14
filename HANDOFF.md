@@ -115,12 +115,15 @@ Verified locally on 2026-09-14:
 - The two trees share the same protocol hash, so the manifest and physical topology—not the
   hash—identify redox state.
 
-**Still unverified remotely:** a read-only SSH check was retried 2026-09-14 and reached
-`scc1.bu.edu`, but authentication failed (`Permission denied (publickey,keyboard-interactive,
-hostbased)`) before any remote path could be read. Therefore the local check does not prove
-that live `results/fep/G93A/` was restored to the 2SH baseline or that the SS tree was copied
-to a second SCC archive. Recheck both facts when SCC credentials are available. Do not submit
-anything merely to test access.
+**Still unverified remotely:** the user reported restored SCC access on 2026-09-14, but this
+agent execution environment has no forwarded credential: key-only access was rejected and the
+interactive path stopped at the password prompt. No remote path was read. In an authenticated
+SCC shell, compare each live `results/fep/G93A/folded/system_r*/hybrid.top` SHA-256 against the
+known 2SH value `ed830d0b5085113245f8c914437684b79cac624d8343c796839803bfb446a8b5` (the SS value is
+`9ce591304f918ac1fab989588d0f0b5d5768ded0cf71297dca4a1f480b17f7d8`) and confirm 120 live
+NPZs. Then locate a second `G93A_SS_diagnostic` tree outside the live results path and confirm
+its manifest and 120 NPZs. Do not submit anything merely to test access, and never share an SCC
+password with an agent.
 
 ## CPU-only reproduction
 
@@ -162,12 +165,9 @@ The minimum evidence package is:
 5. G93A negative disulfide test with topology evidence;
 6. archive/protocol history and the A4V raw-window loss stated explicitly.
 
-The LiveCoMS presubmission inquiry remains **drafted but not sent** in
-[`docs/livecoms_inquiry.md`](docs/livecoms_inquiry.md). It now includes the closed source audit
-and negative SS result. The current Lessons Learned Lead Editor and email route were verified
-2026-09-14; the user must fill the identity, expertise, and maintenance-stewardship placeholders
-and approve the proposed license/update plan before sending. The bounded scope was approved
-2026-09-14. Never send the inquiry autonomously.
+The LiveCoMS presubmission inquiry is **parked by user direction as of 2026-09-14**. Its draft
+remains in [`docs/livecoms_inquiry.md`](docs/livecoms_inquiry.md) for provenance, but it is not
+an active deliverable and must not be sent autonomously.
 
 ## Things not to do
 

@@ -277,15 +277,16 @@ Established:
 
 Not established, and not addressable by reanalysis:
 
-- That the windows encode the intended physical system. Reproducing an estimate from saved reduced potentials cannot detect a wrong topology, redox state, residue mapping, cap geometry or unit. That is the reference-state audit, still to be written.
-- That the experimental references are comparable to what was simulated (`docs/reference_state_audit.md`, not yet written).
+- That the windows encode the intended physical system. Reproducing an estimate from saved reduced potentials cannot detect a wrong topology, redox state, residue mapping, cap geometry or unit. The subsequently completed reference-state audit addresses the available provenance but cannot recover absent trajectory evidence.
+- That the experimental references are comparable to what was simulated. The subsequently completed `docs/reference_state_audit.md` found a heterogeneous apo-SS benchmark against apo-2SH calculations.
 - Anything about A4V's gate point beyond its run-time record.
 - Generality. 48 records is 8 variants at **6 sites** (4, 18, 64, 93, 113, 149; the seven *usable* gate points span 5, F64A being the excluded one), one target, one force field, one estimator, one water model. The correlations in §6 are a statement about this dataset, not about FEP.
 - Which replicate sampled the correct basin. Two agreeing replicates are still not ground truth — the review's caution stands.
 - The §6 overlap/closure-vs-error rankings mix protocols: A4V's row is the 9 ns folded rerun, the other six are 3 ns. Six of seven are internally consistent; the seventh is the only A4V point that re-derives from raw output. Stated as a negative result, so the mixing weakens nothing it claims — but it rules the table out as a positive finding on its own.
 
-## 8. Next
+## 8. Subsequent work
 
-1. `docs/reference_state_audit.md` — the remaining week-1 deliverable, and now the binding one.
-2. LiveCoMS presubmission inquiry (user's task).
+The reference-state audit, forensic sensitivity analysis, and G93A disulfide diagnostic were
+subsequently completed. The LiveCoMS inquiry was parked by user direction on 2026-09-14. See
+`HANDOFF.md` for the remaining archival and independent-reproduction closeout items.
 3. The §6 analysis is the LiveCoMS note's central figure. It is also the smallest working instance of candidate 1 in `post_pivot_review.md` §6 — the same computation over public OpenFE repeats is that project's week-1 killer test.

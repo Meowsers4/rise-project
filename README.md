@@ -378,10 +378,14 @@ sod1-fep/
 ### Still open for closeout
 - **SCC archive verification:** confirm that live `results/fep/G93A` is the 2SH baseline
   and that the SS diagnostic has a second SCC copy.
-- **LiveCoMS inquiry:** fill author identity, expertise, and stewardship fields; approve
-  the license/update plan; then send manually.
 - **Independent reproducibility check:** a second person should reproduce Table 3 and
   Figure 4 from the manifest and frozen inputs.
+- **Optional final artifact:** the evidence-locked outline and figure package are complete;
+  convert them into a polished report or manuscript only if a submission-ready document is
+  wanted.
+
+The LiveCoMS inquiry was parked at the user's direction on 2026-09-14 and is not active
+project work.
 
 ### Closed — do not reopen
 - **Alternative target fallback (TTR):** **rejected.** TTR FEP/TI stability is

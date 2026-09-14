@@ -86,7 +86,7 @@ def audit_columns(variant: str, wt_aa: str, mut_aa: str) -> dict[str, str]:
     return {
         "charge_change": "true" if dq else "false",
         "wells2021": "true" if variant in _WELLS_2021 else "false",
-        # Populated from the Axakova 2025 DMS supplementary; blocks claim C3 until then.
+        # Reserved for a future scope expansion; C3 was retired on 2026-09-14.
         "axakova_class": "",
     }
 

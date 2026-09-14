@@ -1,7 +1,8 @@
-# LiveCoMS presubmission inquiry — ready for user review, 2026-09-14
+# LiveCoMS presubmission inquiry — parked by user direction, 2026-09-14
 
-Week-1 deliverable from [`post_pivot_review.md`](post_pivot_review.md) §3. This is a draft for
-the user to complete and send; it has not been sent and must not be sent autonomously.
+Former week-1 deliverable from [`post_pivot_review.md`](post_pivot_review.md) §3. The user
+parked this inquiry on 2026-09-14. It is retained as a draft for provenance, is not active
+project work, and must not be sent autonomously.
 
 The current route was verified 2026-09-14 against the official
 [author instructions](https://livecomsjournal.github.io/authors/policies/) and
