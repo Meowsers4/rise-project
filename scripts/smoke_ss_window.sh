@@ -62,30 +62,26 @@ if [[ ! -f "$T" ]]; then
     if (( WINDOW_STATUS != 0 )); then exit "$WINDOW_STATUS"; else exit 1; fi
 fi
 
-# pmx/GROMACS name a bridged cysteine CYS2 (amber) or CYX; a free thiol keeps HG.
-BRIDGED=$(grep -cE '\bCYS2\b|\bCYX\b' "$T" || true)
-echo "bridged-cysteine residue lines in hybrid.top: ${BRIDGED}"
-echo "--- residue names for the four cysteines (6, 57, 111, 146) ---"
+# GROMACS 2025 may preserve the printed residue label CYS even after selecting the CYX
+# building block. Verify physical topology: the direct SG-SG bond and the HG pattern.
 set +e
 python - "$T" <<'PY'
 import sys
-# [ atoms ] lines: nr type resnr residue atom cgnr charge mass
-names={}
-for line in open(sys.argv[1]):
-    p=line.split()
-    if len(p)>=5 and p[0].isdigit() and p[2].isdigit():
-        rn=int(p[2]); nm=p[3]
-        if nm.upper().startswith(("CYS","CYX")): names.setdefault(rn,set()).add(nm)
-cys=sorted(names)
-print(f"cysteine-like residues found: {len(cys)}")
-for rn in cys: print(f"  resnr {rn:4d}  {sorted(names[rn])}")
-bridged=[rn for rn,ns in names.items() if any(n.upper() in ("CYS2","CYX") for n in ns)]
-free=sorted(set(cys)-set(bridged))
-print(f"\nbridged: {sorted(bridged)}   free thiol: {free}")
-print("EXPECT exactly 2 bridged (the C57/C146 pair) and 2 free (C6, C111).")
-passed=sorted(bridged)==[57,146] and free==[6,111]
-print("VERDICT:", "PASS" if passed else "FAIL -- required C57-C146 bridge is absent or spurious")
-raise SystemExit(0 if passed else 1)
+from pathlib import Path
+
+from src.fep.pmx_engine import assert_topology_disulfide_pattern, topology_cysteine_state
+
+top = Path(sys.argv[1])
+state = topology_cysteine_state(top)
+print("cysteines:", state["cysteines"])
+print("SG-SG bonds:", state["sg_bonds"])
+print("with HG:", state["with_hg"], "without HG:", state["without_hg"])
+try:
+    assert_topology_disulfide_pattern(top, bridge=(57, 146), free_thiols=(6, 111))
+except ValueError as exc:
+    print("VERDICT: FAIL --", exc)
+    raise SystemExit(1)
+print("VERDICT: PASS -- direct C57-C146 SG-SG bond; only C6 and C111 retain HG")
 PY
 TOPOLOGY_STATUS=$?
 set -e

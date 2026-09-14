@@ -312,9 +312,10 @@ def _ss_argv(cfg: dict) -> list[str]:
 
     Passing ``-ss`` with no answers is a HANG, not a request for automatic selection.
     Omitting it avoids that hang and asks GROMACS to use its distance/specbond machinery,
-    but the 2026-09-13 smoke test proved that omission alone did NOT create C57-C146 in
-    this two-pass pmx build. The SS diagnostic remains stopped at its topology gate; this
-    helper does not imply that the resulting topology is oxidised.
+    but the original 2026-09-13 name-based smoke verdict could not prove whether that
+    happened: GROMACS printed all four residues as CYS while removing HG from C57/C146.
+    The actual SG-SG bond directive is authoritative; this helper alone does not imply
+    that the resulting topology is oxidised.
     """
     return ["-ss"] if cfg["fep"].get("keep_disulfide_reduced", True) else []
 
@@ -377,6 +378,79 @@ def assert_topology_disulfide_free(top: Path, gro: Path) -> None:
             f"{gro}: cysteine residues {missing} have SG but no HG -- they are bridged, "
             "not reduced. v1 simulates the disulfide-reduced form."
         )
+
+
+def topology_cysteine_state(top: Path) -> dict:
+    """Read cysteine hydrogens and actual SG-SG bonds from a GROMACS topology.
+
+    Residue labels are not authoritative: with GROMACS 2025's default ``-nortpres``
+    behaviour an oxidised residue can still be printed as ``CYS`` even though pdb2gmx
+    selected the ``CYX`` building block. The atom list and bond directives are the
+    physical evidence.
+    """
+    section = ""
+    sg_atoms: dict[int, int] = {}
+    residue_names: dict[int, set[str]] = {}
+    hg_resids: set[int] = set()
+    bonds: list[tuple[int, int]] = []
+
+    for raw in top.read_text().splitlines():
+        clean = raw.split(";", 1)[0].strip()
+        if clean.startswith("[") and clean.endswith("]"):
+            section = clean.strip("[] ").lower()
+            continue
+        fields = clean.split()
+        if section == "atoms" and len(fields) >= 5:
+            if not fields[0].isdigit() or not fields[2].isdigit():
+                continue
+            atom_id, resid, resname, atom = int(fields[0]), int(fields[2]), fields[3], fields[4]
+            if atom == "SG":
+                sg_atoms[atom_id] = resid
+                residue_names.setdefault(resid, set()).add(resname)
+            elif atom == "HG":
+                hg_resids.add(resid)
+        elif section == "bonds" and len(fields) >= 2:
+            if fields[0].isdigit() and fields[1].isdigit():
+                bonds.append((int(fields[0]), int(fields[1])))
+
+    cysteines = set(sg_atoms.values())
+    sg_bonds = sorted({
+        tuple(sorted((sg_atoms[a], sg_atoms[b])))
+        for a, b in bonds
+        if a in sg_atoms and b in sg_atoms and sg_atoms[a] != sg_atoms[b]
+    })
+    bridged = {resid for pair in sg_bonds for resid in pair}
+    return {
+        "cysteines": sorted(cysteines),
+        "with_hg": sorted(cysteines & hg_resids),
+        "without_hg": sorted(cysteines - hg_resids),
+        "sg_bonds": sg_bonds,
+        "bridged": sorted(bridged),
+        "free_thiol": sorted(cysteines - bridged),
+        "residue_names": {resid: sorted(names) for resid, names in residue_names.items()},
+    }
+
+
+def assert_topology_disulfide_pattern(top: Path, bridge: tuple[int, int],
+                                      free_thiols: tuple[int, ...]) -> dict:
+    """Require one exact SG-SG bridge and the matching cysteine HG pattern."""
+    state = topology_cysteine_state(top)
+    expected_bridge = tuple(sorted(bridge))
+    expected_bridged = sorted(expected_bridge)
+    expected_free = sorted(free_thiols)
+    expected_cysteines = sorted(set(expected_bridged) | set(expected_free))
+    failures = []
+    if state["cysteines"] != expected_cysteines:
+        failures.append(f"cysteines={state['cysteines']} expected={expected_cysteines}")
+    if state["sg_bonds"] != [expected_bridge]:
+        failures.append(f"SG-SG bonds={state['sg_bonds']} expected={[expected_bridge]}")
+    if state["without_hg"] != expected_bridged:
+        failures.append(f"without HG={state['without_hg']} expected={expected_bridged}")
+    if state["with_hg"] != expected_free:
+        failures.append(f"with HG={state['with_hg']} expected={expected_free}")
+    if failures:
+        raise ValueError(f"{top}: wrong disulfide pattern: " + "; ".join(failures))
+    return state
 
 
 def cysteine_geometry_report(system: Path) -> str:
@@ -459,29 +533,14 @@ def cysteine_geometry_report(system: Path) -> str:
         if not path.exists():
             lines.append(f"  {label}: {name} MISSING")
             continue
-        residues: dict[int, dict[str, set[str]]] = {}
-        section = ""
-        for raw in path.read_text().splitlines():
-            clean = raw.split(";", 1)[0].strip()
-            if clean.startswith("[") and clean.endswith("]"):
-                section = clean.strip("[] ").lower()
-                continue
-            if section != "atoms":
-                continue
-            fields = clean.split()
-            if len(fields) < 5 or not fields[0].isdigit() or not fields[2].isdigit():
-                continue
-            resid, resname, atom = int(fields[2]), fields[3], fields[4]
-            if resname.upper().startswith(("CYS", "CYX")):
-                entry = residues.setdefault(resid, {"names": set(), "atoms": set()})
-                entry["names"].add(resname)
-                entry["atoms"].add(atom)
+        state = topology_cysteine_state(path)
         summary = ", ".join(
-            f"{resid}:{'/'.join(sorted(state['names']))}:HG="
-            f"{'yes' if 'HG' in state['atoms'] else 'no'}"
-            for resid, state in sorted(residues.items())
+            f"{resid}:{'/'.join(state['residue_names'].get(resid, ['?']))}:HG="
+            f"{'yes' if resid in state['with_hg'] else 'no'}"
+            for resid in state["cysteines"]
         )
-        lines.append(f"  {label}: {summary or 'NO CYSTEINE-LIKE RESIDUES FOUND'}")
+        lines.append(f"  {label}: {summary or 'NO CYSTEINE SG ATOMS FOUND'}")
+        lines.append(f"    actual SG-SG bonds: {state['sg_bonds']}")
     return "\n".join(lines)
 
 

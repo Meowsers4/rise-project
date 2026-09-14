@@ -5,13 +5,13 @@ Written for an agent with **no prior context**. Updated 2026-09-13.
 Read `README.md` for the scientific design and `CLAUDE.md` for the operating rules. This
 file is only: where things stand, what to do next, and what not to break.
 
-> **URGENT DIAGNOSTIC STATUS — 2026-09-13:** On branch `diag/g93a-ss`, the required
-> SS smoke topology gate failed: `bridged: []`, `free thiol: [6, 57, 111, 146]`.
-> Omitting `-ss` avoided the interactive hang but still built 2SH. Do **not** submit or
-> resubmit `sod1_fep`; cancel any active array and quarantine any finished tree as an
-> invalid 2SH attempt. Next, inspect the Cys SG coordinates/residue names through
-> `wt.pdb` → `wt_gmx.pdb` → `hybrid.pdb` → `conf.gro`, plus the active `specbond.dat`,
-> before changing construction. The later `KeyError: 'OUT'` was reporting-only.
+> **URGENT DIAGNOSTIC STATUS — 2026-09-13:** On branch `diag/g93a-ss`, the original
+> SS smoke gate reported `bridged: []`, but it inferred bonding from residue labels alone.
+> A later inspection found C57/C146 lack HG while C6/C111 retain it, consistent with the
+> intended SS state despite every printed label remaining `CYS`; active `specbond.dat` is
+> correct. Do **not** resubmit until the actual SG-SG bond directive is verified. The gate
+> now checks the direct bond and HG pattern rather than CYS2/CYX names. `KeyError: 'OUT'`
+> was reporting-only.
 
 > **Read [`docs/stop_rule_reanalysis.md`](docs/stop_rule_reanalysis.md) first (2026-09-12).**
 > Every documented estimate below has now been re-derived from the raw archived windows and

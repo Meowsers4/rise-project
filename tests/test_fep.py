@@ -456,6 +456,39 @@ def test_cysteine_geometry_report_identifies_both_pdb2gmx_inputs(tmp_path):
     assert "pdb2gmx pass 2: topol.top MISSING" in report
 
 
+def test_ss_topology_gate_uses_actual_sg_bond_not_residue_label(tmp_path):
+    """GROMACS can print oxidised residues as CYS, so CYS2/CYX grep is insufficient."""
+    from src.fep.pmx_engine import (
+        assert_topology_disulfide_pattern,
+        topology_cysteine_state,
+    )
+
+    top = tmp_path / "hybrid.top"
+    top.write_text(
+        "[ atoms ]\n"
+        "1 S 6 CYS SG 1 0.0 32.0\n"
+        "2 HS 6 CYS HG 1 0.0 1.0\n"
+        "3 S 57 CYS SG 2 0.0 32.0\n"
+        "4 S 111 CYS SG 3 0.0 32.0\n"
+        "5 HS 111 CYS HG 3 0.0 1.0\n"
+        "6 S 146 CYS SG 4 0.0 32.0\n"
+        "[ bonds ]\n"
+        "3 6 1\n"
+    )
+
+    state = topology_cysteine_state(top)
+    assert state["residue_names"] == {6: ["CYS"], 57: ["CYS"],
+                                        111: ["CYS"], 146: ["CYS"]}
+    assert state["sg_bonds"] == [(57, 146)]
+    assert state["with_hg"] == [6, 111]
+    assert state["without_hg"] == [57, 146]
+    assert_topology_disulfide_pattern(top, bridge=(57, 146), free_thiols=(6, 111))
+
+    top.write_text(top.read_text().replace("3 6 1\n", ""))
+    with pytest.raises(ValueError, match="SG-SG bonds"):
+        assert_topology_disulfide_pattern(top, bridge=(57, 146), free_thiols=(6, 111))
+
+
 def test_mdrun_retries_a_busy_gpu_but_not_a_blown_up_system(monkeypatch, tmp_path):
     """CUDA #46 is transient contention; a LINCS explosion is not.
 
@@ -938,8 +971,8 @@ def test_ss_flag_is_omitted_to_avoid_an_unanswered_interactive_prompt():
 
     Passing `-ss` with no stdin answers does not produce a wrong topology -- it HANGS,
     because pdb2gmx blocks on a prompt nobody answers. That is what happened on the first
-    end-to-end run of the SS diagnostic. Omission did not ultimately form the bond, so
-    this test covers process interaction only, not the required topology verdict.
+    end-to-end run of the SS diagnostic. This test covers process interaction only, not
+    the required direct SG-SG bond plus cysteine-HG topology verdict.
     """
     from src.fep.pmx_engine import _pdb2gmx_stdin, _ss_argv
 

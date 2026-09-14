@@ -1,12 +1,13 @@
 # Pre-registration — G93A disulfide diagnostic (SS vs 2SH)
 
-**Status: STOPPED AT THE TOPOLOGY GATE (2026-09-13).** The smoke build produced no
-C57-C146 bridge: `bridged: []`, `free thiol: [6, 57, 111, 146]`. It is another invalid 2SH
-attempt, not an SS result. Omitting `-ss` fixed the unanswered-prompt hang but did not make
-automatic special-bond detection create the bridge. Do not submit or resubmit the array.
-Inspect `wt.pdb`, `wt_gmx.pdb`, `hybrid.pdb`, `conf.gro`, and the active `specbond.dat`
-before choosing a construction fix; do not force a topology bond blindly. The later
-`KeyError: 'OUT'` was only a smoke-script reporting bug after this verdict.
+**Status: TOPOLOGY GATE UNDER RECHECK (2026-09-13); DO NOT RESUBMIT YET.** The original
+smoke report said `bridged: []`, `free thiol: [6, 57, 111, 146]`, but that checker inferred
+state only from printed residue labels (`CYS2`/`CYX`). A subsequent atom-list inspection
+found the stronger expected pattern: C57/C146 have no HG while C6/C111 retain HG, even though
+all are printed as `CYS`. The active `specbond.dat` contains the expected CYS-SG rule. The
+actual SG-SG bond directive must now be checked; it decides whether the original verdict was
+a false negative or the topology is merely deprotonated and still invalid. The later
+`KeyError: 'OUT'` was only a smoke-script reporting bug after the name-based verdict.
 
 The diagnostic was pre-registered and signed off by the user 2026-09-12; config is staged on
 branch `diag/g93a-ss` (never to be merged). Everything below — baseline, endpoint, and all
@@ -88,10 +89,11 @@ Computed locally 2026-09-12 against the committed engine:
 
 - With `ns_per_window.folded: 3` and `equilibration_ns.folded: 0.5`, the folded fingerprint is **`822108e9db71124d`** — byte-identical to the G93A archive. Reverting those two values is necessary **and sufficient** for protocol comparability.
 - Flipping `keep_disulfide_reduced` **does not change the fingerprint**: the disulfide is a topology property, absent from the `.mdp`, and `protocol_extra()` carries only `independent_replicate_systems`. **The hash cannot witness this experiment** — §6 trap 2.
-- `_pdb2gmx_stdin()` returns `""` when the flag is false. **Pre-run expectation, falsified
-  by the 2026-09-13 smoke:** omitting interactive `-ss` was expected to let the default
-  distance/specbond path form C57-C146. It avoided the hang but produced four free thiols.
-  The disulfide-free guard is gated by the same flag, so the external topology gate caught it.
+- `_pdb2gmx_stdin()` returns `""` when the flag is false. The pre-run expectation was that
+  omitting interactive `-ss` would let the default distance/specbond path form C57-C146.
+  It avoided the hang. Whether it also formed the bond was initially misreported because the
+  gate trusted residue labels; the HG pattern is consistent with SS, and the direct SG-SG
+  bond check is now required.
 - No gate variant's tripeptide contains Cys57 or Cys146 (closest: I149A at 148–150), confirming §3's cancellation argument.
 
 ## 6. Three traps that would make this measure nothing
@@ -118,9 +120,9 @@ The proposed SS state used a different route. Stage 1 calls `strip_disulfide_bon
 which removes the SG–SG **bond from the OpenMM topology only** and does not touch coordinates
 ([build.py:117](../src/prep/build.py#L117)) — the two SG atoms stay at their crystal separation
 of ~2 Å. The pre-run hypothesis was that pdb2gmx would then re-detect C57-C146 by SG-SG
-distance when interactive `-ss` was omitted. **The smoke falsified that construction
-hypothesis:** the pair remained free. The intended state still must be created in the GROMACS
-topology rather than by changing `structure.disulfide`, but the safe mechanism is unresolved.
+distance when interactive `-ss` was omitted. The original residue-name-only smoke check did
+not validly test that hypothesis. C57/C146 losing HG is consistent with detection; the direct
+SG-SG bond directive is the remaining decisive evidence.
 
 Consequence: `structure.disulfide: reduced` remains correct and unchanged throughout this
 experiment, and the only config key touching redox is `fep.keep_disulfide_reduced`.
