@@ -11,9 +11,9 @@
     "a4v_attempt2_raw_npz": 120,
     "ss_raw_npz": 120,
     "files_total": 1120,
-    "bytes_total": 525722996
+    "bytes_total": 525722743
   },
-  "aggregate_sha256": "a59198f0e4d26beaa1b7696ac419793ecf6214897b395dec6a1557569bbab70e",
+  "aggregate_sha256": "81b5a21447983ba0d80f2c835aad042064465aafa9ef6cb5d0e3aceb75890416",
   "files": [
     {
       "root": "main_archive",
@@ -5952,8 +5952,8 @@
     {
       "root": "repository",
       "path": "config/pipeline.yaml",
-      "size_bytes": 25076,
-      "sha256": "16e7331683a461093e78e9fb38bf709d047d8fa4573b2296b9cba4ecf77df750"
+      "size_bytes": 24823,
+      "sha256": "fdb7e51d0e4aca8a10ba31a12fc069b91b007bdba04ed2459a9de9c0118692c7"
     },
     {
       "root": "repository",

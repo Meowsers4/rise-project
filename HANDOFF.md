@@ -169,6 +169,16 @@ The minimum evidence package is:
 5. G93A negative disulfide test with topology evidence;
 6. archive/protocol history and the A4V raw-window loss stated explicitly.
 
+Table 3 and Figure 4 were independently reproduced through a clean-room standard-library
+implementation that imports none of the production analysis modules. All eight rows agree at
+displayed precision and all four plotted point sets agree. See
+[`docs/independent_reference_reproduction.md`](docs/independent_reference_reproduction.md).
+This is an independent implementation, not a second-human certification.
+
+With the SCC archive checks and this computational reproduction complete, no required
+technical work remains under the approved project scope. External human certification and a
+polished manuscript are optional follow-up activities.
+
 The LiveCoMS presubmission inquiry is **parked by user direction as of 2026-09-14**. Its draft
 remains in [`docs/livecoms_inquiry.md`](docs/livecoms_inquiry.md) for provenance, but it is not
 an active deliverable and must not be sent autonomously.

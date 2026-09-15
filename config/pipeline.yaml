@@ -151,12 +151,9 @@ fep:                        # Stage 3 — the cluster workhorse (GPU)
                             # protocol hash separately (pmx_engine.protocol_extra) -- when
                             # false the hash is byte-identical to before it existed.
   replicates: 3             # >=3 required. 3 = the FLOOR, do not go lower.
-                            # PENDING 3 -> 5: README §9 resolved replicates at 5. NOT changed
-                            # yet because every running array task re-reads this file and
-                            # submit_array.sh aborts when legs*windows*replicates disagrees
-                            # with SGE_TASK_LAST -- bumping it mid-flight kills the array.
-                            # Raise it only between arrays; r3/r4 are then additive (72 new
-                            # tasks per variant), not a rerun.
+                            # The former 3 -> 5 plan was retired with the GPU campaign on
+                            # 2026-09-14. Keep this frozen for provenance. Any future campaign
+                            # needs a new preregistration and matching array bounds.
   legs:                     # thermodynamic cycle
     - folded                # mutation in the folded protein
     - unfolded              # mutation in capped tripeptide reference

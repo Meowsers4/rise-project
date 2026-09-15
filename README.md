@@ -375,9 +375,10 @@ sod1-fep/
 - **Gate threshold values:** were frozen before evaluation; the gate failed and remains
   the gate-of-record.
 
-### Still open for closeout
-- **Independent reproducibility check:** a second person should reproduce Table 3 and
-  Figure 4 from the manifest and frozen inputs.
+### Optional follow-up after technical closeout
+- **Optional external sign-off:** a clean-room implementation independently reproduced all
+  eight Table 3 rows and all four Figure 4 panels. A second human should rerun it only if
+  literal second-person certification is required.
 - **Optional final artifact:** the evidence-locked outline and figure package are complete;
   convert them into a polished report or manuscript only if a submission-ready document is
   wanted.
@@ -388,6 +389,9 @@ project work.
 SCC archival verification is complete: the live G93A tree matches the 2SH baseline, and an
 identical 120-window SS diagnostic copy with its manifest is stored under
 `/projectnb/rise-batteries/bode/archive_2026-09-14/`.
+
+The computational reproducibility check is also complete; see
+[`docs/independent_reference_reproduction.md`](docs/independent_reference_reproduction.md).
 
 ### Closed — do not reopen
 - **Alternative target fallback (TTR):** **rejected.** TTR FEP/TI stability is

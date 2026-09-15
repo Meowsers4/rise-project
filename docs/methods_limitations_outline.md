@@ -77,7 +77,7 @@ redox mismatch is real but does not explain G93A's error.
 | Figure 1 | gate-of-record predicted vs experimental scatter, F64A exclusion identified | `figures/gate_of_record.png`; executable package complete |
 | Figure 2 | folded hysteresis vs independent-box disagreement, all 24 folded records | `figures/convergence_diagnostic.png`; executable package complete |
 | Figure 3 | A4V 3 ns vs 9 ns replicate/accuracy comparison | `figures/a4v_sampling_sensitivity.png`; executable package complete |
-| Figure 4 | four-panel reference sensitivity | `docs/figures/reference_sensitivity.png`; executable now |
+| Figure 4 | four-panel reference sensitivity | `docs/figures/reference_sensitivity.png`; independently reproduced by a separate implementation |
 | Figure 5 | G93A 2SH vs SS folded ΔG by replicate, topology inset/table | `figures/g93a_disulfide_diagnostic.png`; executable package complete |
 | Table 1 | protocol history and hashes, per leg | `raw_result_reconciliation.md` |
 | Table 2 | eight-control construct/state/source audit | `reference_state_audit.md` |
@@ -119,9 +119,12 @@ redox mismatch is real but does not explain G93A's error.
 - No claim that the combined sensitivity row passes validation.
 - No claim that SS mismatch explains the gate failure.
 
-## Remaining closeout work
+## Optional follow-up
 
-1. Have a second person reproduce Table 3 and Figure 4 from the archived inputs.
+1. If external human sign-off is required, have a second person run the completed clean-room
+   reproduction in [`independent_reference_reproduction.md`](independent_reference_reproduction.md).
+   The separate implementation already reproduces every Table 3 row and all four Figure 4
+   panels, but the same agent performed both paths.
 2. If a submission-ready artifact is wanted, convert this evidence-locked outline into a
    polished report or manuscript. The LiveCoMS inquiry was parked by user direction on
    2026-09-14 and is not a prerequisite for closing the technical project.

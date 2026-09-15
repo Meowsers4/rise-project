@@ -1,0 +1,82 @@
+{
+  "used": [
+    "I18V",
+    "I113T",
+    "A4V",
+    "G93A",
+    "G93S",
+    "I149A",
+    "G93V"
+  ],
+  "excluded": [
+    "F64A"
+  ],
+  "closure_cap_kcal": 1.0,
+  "predicted": {
+    "I18V": 0.8292101987940607,
+    "I113T": 2.5907683805493433,
+    "A4V": 3.5441177106402493,
+    "G93A": 1.2586774585329301,
+    "G93S": 1.20360944032974,
+    "I149A": 4.981916129859519,
+    "G93V": 2.8309478830758548
+  },
+  "metrics": {
+    "gate_of_record": {
+      "label": "gate of record",
+      "pearson": 0.32601995184899846,
+      "spearman": 0.5,
+      "rmse": 2.123480578492321,
+      "mue": 1.7846825197006642
+    },
+    "tavg_constant_dcp_half": {
+      "label": "dimer normalization only, constant dCp",
+      "pearson": 0.6569662120715157,
+      "spearman": 0.6071428571428571,
+      "rmse": 1.1222858358463634,
+      "mue": 1.0203968054149495
+    },
+    "temp25_constant_dcp_dimer": {
+      "label": "temperature only, 25 C constant dCp, still dimer",
+      "pearson": 0.5393156245902535,
+      "spearman": 0.5357142857142857,
+      "rmse": 1.4007172868339348,
+      "mue": 1.2703968054149495
+    },
+    "temp25_constant_dcp_half": {
+      "label": "temperature + normalization, constant dCp",
+      "pearson": 0.7542614073266695,
+      "spearman": 0.8214285714285714,
+      "rmse": 1.0738193189195735,
+      "mue": 0.9016988978165481
+    },
+    "tavg_tempdep_dcp_dimer": {
+      "label": "49.4 C, temperature-dependent dCp, still dimer",
+      "pearson": 0.34024376578626686,
+      "spearman": 0.5,
+      "rmse": 2.0909885613805623,
+      "mue": 1.7561110911292352
+    },
+    "tavg_tempdep_dcp_half": {
+      "label": "normalization only, temperature-dependent dCp",
+      "pearson": 0.6656025468014879,
+      "spearman": 0.6071428571428571,
+      "rmse": 1.1146684561182654,
+      "mue": 1.0061110911292352
+    },
+    "temp25_tempdep_dcp_dimer": {
+      "label": "temperature only, 25 C temperature-dependent dCp, still dimer",
+      "pearson": 0.642074031583452,
+      "spearman": 0.6785714285714286,
+      "rmse": 1.1870792452413952,
+      "mue": 1.0561110911292353
+    },
+    "temp25_tempdep_dcp_half": {
+      "label": "temperature + normalization, temperature-dependent dCp",
+      "pearson": 0.7667828666899029,
+      "spearman": 0.75,
+      "rmse": 1.1173395868733647,
+      "mue": 1.0088417549594053
+    }
+  }
+}
