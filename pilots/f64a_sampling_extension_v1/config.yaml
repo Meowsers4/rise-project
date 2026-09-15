@@ -1,0 +1,31 @@
+# Registered 2026-09-15 after the retrospective temporal analysis, before submission.
+base_config: config/pipeline.yaml
+pilot_id: f64a_sampling_extension_v1
+status: authorized_2026-09-15
+
+variant: F64A
+leg: folded
+lambda_windows: 20
+replicates: 3
+source_protocol: 822108e9db71124d
+
+# Continue the exact archived stochastic paths. The source run contains 0.5 ns discarded
+# equilibration plus 3.0 ns retained production, so its checkpoint time is 3500 ps.
+baseline_ns: 3.0
+extension_ns: 6.0
+target_ns: 9.0
+baseline_total_time_ps: 3500.0
+energy_stride_ps: 1.0
+baseline_samples_per_window: 3001
+target_samples_per_window: 9001
+
+# A real 10 ps continuation of w0/r0 tests TPR/CPT compatibility, GPU placement,
+# continuation output, and dH/dlambda parsing. It lives outside production outputs.
+first_light_extension_ps: 10.0
+
+output_root: results/pilots/f64a_sampling_extension_v1
+trajectory_retention: estimates_only
+max_concurrent_tasks: 8
+gpu_type: L40S
+walltime: "12:00:00"
+project: rise-batteries

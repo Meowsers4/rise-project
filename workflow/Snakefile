@@ -1,5 +1,5 @@
 # Snakefile — SOD1 FEP variant pipeline DAG
-# Skeleton only: rule structure + I/O wiring. Shell/script bodies are stubs (TODO).
+# Historical simulation rules plus the current CPU-only forensic release.
 # Design intent lives in README.md; parameters live in config/pipeline.yaml.
 #
 # The DAG:
@@ -12,7 +12,8 @@
 
 configfile: "config/pipeline.yaml"
 
-import csv, os
+import csv, json, os, yaml
+from pathlib import Path
 
 # ---- Load the panel to build wildcards -------------------------------------
 # variants.csv is the source of truth (Stage 0 output).
@@ -42,7 +43,7 @@ def gate_dependency(wildcards):
 # ---- Target rule -----------------------------------------------------------
 rule all:
     input:
-        GATE_REPORT,
+        config['forensic_review']['release_file'],
 
 
 # ---- Stage 0: build & stratify the variant panel ---------------------------
@@ -114,6 +115,62 @@ rule fep_ddg:
         "--config config/pipeline.yaml --out {output}"
 
 
+# ---- Isolated post-gate pilot: exact-path F64A folded continuation ----------
+# The stage manifests are explicit external inputs because creating them copies and
+# validates a frozen archive. GPU execution remains an SGE array, matching Stage 3's
+# scheduler contract; these rules record the dependency graph and support targeted
+# Snakemake execution without adding the pilot to the default forensic-release target.
+F64A_PILOT_CONFIG = 'pilots/f64a_sampling_extension_v1/config.yaml'
+F64A_PILOT = yaml.safe_load(Path(F64A_PILOT_CONFIG).read_text())
+F64A_PILOT_ROOT = F64A_PILOT['output_root']
+F64A_PILOT_WINDOWS = list(range(F64A_PILOT['lambda_windows']))
+F64A_PILOT_REPLICATES = list(range(F64A_PILOT['replicates']))
+
+rule f64a_extension_first_light:
+    input:
+        stage=F64A_PILOT_ROOT + '/first_light/stage_manifest.json',
+        code='src/fep/f64a_extension.py',
+        config=F64A_PILOT_CONFIG,
+    output:
+        F64A_PILOT_ROOT + '/first_light/fep/F64A/folded/w0_r0.npz',
+    resources:
+        gpu=1,
+    shell:
+        'python -m src.fep.f64a_extension --config {input.config:q} '
+        'run --window 0 --rep 0 --first-light'
+
+
+rule f64a_extension_window:
+    input:
+        stage=F64A_PILOT_ROOT + '/production/stage_manifest.json',
+        first_light=rules.f64a_extension_first_light.output,
+        code='src/fep/f64a_extension.py',
+        config=F64A_PILOT_CONFIG,
+    output:
+        F64A_PILOT_ROOT + '/production/fep/F64A/folded/w{window}_r{rep}.npz',
+    resources:
+        gpu=1,
+    shell:
+        'python -m src.fep.f64a_extension --config {input.config:q} '
+        'run --window {wildcards.window} --rep {wildcards.rep}'
+
+
+rule f64a_extension_analysis:
+    input:
+        windows=expand(
+            F64A_PILOT_ROOT + '/production/fep/F64A/folded/w{window}_r{rep}.npz',
+            window=F64A_PILOT_WINDOWS, rep=F64A_PILOT_REPLICATES,
+        ),
+        code='src/fep/f64a_extension.py',
+        analyzer='src/fep/analyze.py',
+        config=F64A_PILOT_CONFIG,
+        prereg='pilots/f64a_sampling_extension_v1/PREREGISTRATION.md',
+    output:
+        F64A_PILOT_ROOT + '/production/analysis/f64a_extension.json',
+    shell:
+        'python -m src.fep.f64a_extension --config {input.config:q} analyze'
+
+
 # ---- Stage 4: unbiased mechanism MD (flagged subset only) ------------------
 rule md_mechanism:
     input:
@@ -155,3 +212,119 @@ rule validate:
         #       cross-check vs prescreen; classify uncharacterized variants.
         "python -m src.analysis.validate --config config/pipeline.yaml "
         "--out {output}"
+
+# ---- Current project: forensic analysis only, no GPU dependencies ---------
+REVIEW = config['forensic_review']
+ARCHIVE = REVIEW['main_archive']
+SS_ARCHIVE = REVIEW['ss_archive']
+REVIEW_DIR = REVIEW['output_dir']
+TEMPORAL = REVIEW['temporal']
+TEMPORAL_DIR = TEMPORAL['output_dir']
+TEMPORAL_OUTPUTS = TEMPORAL['outputs']
+HISTORICAL_ROOTS = {'main_archive': ARCHIVE, 'ss_archive': SS_ARCHIVE,
+                    'repository': 'data/forensic_baseline_repository'}
+HISTORICAL_INPUTS = [
+    str(Path(HISTORICAL_ROOTS[entry['root']]) / entry['path'])
+    for entry in json.loads(Path('data/forensic_archive_manifest.json').read_text())['files']
+]
+
+rule forensic_diagnostic_audit:
+    input:
+        windows=expand(ARCHIVE + '/fep/{variant}/{leg}/w{window}_r{rep}.npz',
+                       variant=GATE_SUBSET, leg=LEGS, window=WINDOWS, rep=REPLICATES),
+        records=expand(ARCHIVE + '/convergence/{variant}.json', variant=GATE_SUBSET),
+        code='src/analysis/diagnostic_audit.py',
+        analyzer='src/fep/analyze.py',
+        config='config/pipeline.yaml',
+        panel=config['panel']['csv'],
+    output:
+        report=REVIEW_DIR + '/diagnostic_audit.json',
+        records=REVIEW_DIR + '/diagnostic_records.csv',
+        adjacent=REVIEW_DIR + '/adjacent_discrepancies.csv',
+        figure=REVIEW_DIR + '/diagnostic_cancellation.png',
+    shell:
+        'MPLCONFIGDIR=/tmp/sod1fep-mpl python -m src.analysis.diagnostic_audit '
+        '--archive-root {ARCHIVE:q} --output-dir {REVIEW_DIR:q}'
+
+
+rule temporal_diagnostic_audit:
+    input:
+        windows=expand(ARCHIVE + '/fep/{variant}/{leg}/w{window}_r{rep}.npz',
+                       variant=GATE_SUBSET, leg=LEGS, window=WINDOWS, rep=REPLICATES),
+        records=expand(ARCHIVE + '/convergence/{variant}.json', variant=GATE_SUBSET),
+        code='src/analysis/diagnostic_audit.py',
+        analyzer='src/fep/analyze.py',
+        design='docs/temporal_analysis_design.md',
+        config='config/pipeline.yaml',
+        panel=config['panel']['csv'],
+    output:
+        report=TEMPORAL_DIR + '/' + TEMPORAL_OUTPUTS['report'],
+        legs=TEMPORAL_DIR + '/' + TEMPORAL_OUTPUTS['leg_records'],
+        ddg=TEMPORAL_DIR + '/' + TEMPORAL_OUTPUTS['ddg_records'],
+        adjacent=TEMPORAL_DIR + '/' + TEMPORAL_OUTPUTS['adjacent_records'],
+        trajectories=TEMPORAL_DIR + '/' + TEMPORAL_OUTPUTS['trajectories_figure'],
+        local=TEMPORAL_DIR + '/' + TEMPORAL_OUTPUTS['local_figure'],
+    shell:
+        'MPLCONFIGDIR=/tmp/sod1fep-mpl python -m src.analysis.diagnostic_audit '
+        '--temporal --archive-root {ARCHIVE:q} --output-dir {TEMPORAL_DIR:q}'
+
+rule forensic_methods_figures:
+    input:
+        records=expand(ARCHIVE + '/reanalysis_2026-09-12/convergence/{variant}.json', variant=GATE_SUBSET),
+        gate=expand(ARCHIVE + '/fep/{variant}/ddg.json', variant=[v for v in GATE_SUBSET if v != 'A4V']),
+        a4v_gate=ARCHIVE + '/archive/A4V_3ns_ddg.json',
+        a4v_3ns=ARCHIVE + '/archive/A4V_3ns_convergence.json',
+        a4v_9ns=ARCHIVE + '/convergence/A4V.json',
+        ss=SS_ARCHIVE + '/convergence_SS.json',
+        tops2sh=expand(ARCHIVE + '/fep/G93A/folded/system_r{rep}/hybrid.top', rep=REPLICATES),
+        topsss=expand(SS_ARCHIVE + '/folded/system_r{rep}/hybrid.top', rep=REPLICATES),
+        code='src/analysis/methods_figures.py',
+        sensitivity='src/analysis/reference_sensitivity.py',
+        validation='src/analysis/validate.py',
+        config='config/pipeline.yaml',
+        scenarios='data/reference_sensitivity_scenarios.csv',
+    output:
+        gate=REVIEW_DIR + '/gate_of_record.png',
+        diagnostic=REVIEW_DIR + '/convergence_diagnostic.png',
+        sampling=REVIEW_DIR + '/a4v_sampling_sensitivity.png',
+        redox=REVIEW_DIR + '/g93a_disulfide_diagnostic.png',
+        uncertainty=REVIEW_DIR + '/redox_uncertainty.json',
+    shell:
+        'MPLCONFIGDIR=/tmp/sod1fep-mpl python -m src.analysis.methods_figures '
+        '--attempt1-archive {ARCHIVE:q} '
+        '--reanalysis-convergence {ARCHIVE:q}/reanalysis_2026-09-12/convergence '
+        '--ss-archive {SS_ARCHIVE:q} --output-dir {REVIEW_DIR:q}'
+
+rule forensic_reference_reproduction:
+    input:
+        records=expand(ARCHIVE + '/fep/{variant}/ddg.json', variant=[v for v in GATE_SUBSET if v != 'A4V']),
+        a4v=ARCHIVE + '/archive/A4V_3ns_ddg.json',
+        scenarios='data/reference_sensitivity_scenarios.csv',
+        code='scripts/reproduce_reference_sensitivity_independent.py',
+    output:
+        report=REVIEW_DIR + '/reference_reproduction.json',
+        figure=REVIEW_DIR + '/reference_sensitivity.png',
+    shell:
+        'MPLCONFIGDIR=/tmp/sod1fep-mpl python scripts/reproduce_reference_sensitivity_independent.py '
+        '--archive-root {ARCHIVE:q} --json {output.report:q} --figure {output.figure:q}'
+
+rule forensic_release:
+    input:
+        audit=rules.forensic_diagnostic_audit.output,
+        figures=rules.forensic_methods_figures.output,
+        reference=rules.forensic_reference_reproduction.output,
+        manifest='data/forensic_archive_manifest.json',
+        historical=HISTORICAL_INPUTS,
+        sources=[str(p) for folder in ('src', 'tests', 'config', 'docs', 'env', 'scripts', 'workflow', 'data')
+                 for p in Path(folder).rglob('*') if p.is_file()
+                 and '__pycache__' not in p.parts and p.name != '.DS_Store'
+                 and 'data/structures' not in str(p)
+                 and str(p.parent) != REVIEW_DIR and p.suffix not in ('.npz', '.pyc')],
+        overview=['README.md', 'HANDOFF.md', 'CLAUDE.md', 'AGENTS.md'],
+    output:
+        bundle=REVIEW['release_file'],
+        checksum=REVIEW['release_file'] + '.sha256',
+    shell:
+        'python -m src.analysis.forensic_release --archive-root {ARCHIVE:q} '
+        '--ss-archive {SS_ARCHIVE:q} --output {output.bundle:q} '
+        '&& python -m src.analysis.forensic_release --verify {output.bundle:q}'

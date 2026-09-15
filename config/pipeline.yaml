@@ -259,9 +259,9 @@ validation:                 # Stage 5 — the GATE (README §2.2)
   gate_on: positive_control
   # PRE-REGISTERED 2026-08-07, before any gate evaluation (README §2.2). Do not tune
   # these after seeing results -- that is the whole point of fixing them here.
-  min_pearson: 0.70         # go/no-go threshold vs experimental ddG. Raised from 0.6 by the
-                            # literature audit: Wells 2021 reported 0.81 on 10 variants with
-                            # the same toolchain, so 0.6 is not a defensible bar. README §10
+  min_pearson: 0.70         # Historical frozen threshold. Its original rationale cited
+                            # Wells 0.81, subsequently identified as apo-SS dimerization,
+                            # not a matched folding benchmark. Preserve the threshold. README §10
                             # treats r < 0.60 as the PIVOT trigger (methods paper), which is a
                             # different number from the pass mark -- do not conflate them.
   pivot_pearson: 0.60       # below this, stop and reframe (README §10) rather than retune.
@@ -274,8 +274,8 @@ validation:                 # Stage 5 — the GATE (README §2.2)
                             # criterion, not a warning.
   ddg_sign: positive_destabilizing  # exp_ddg AND FEP ddG: positive = destabilizing.
                                      # src/fep must emit this sign so gate Pearson is positive.
-  ddg_gate_column: exp_ddg  # apo-MONOMER ddG is the gate value; exp_ddg_dimer is a
-                            # carried cross-check only and is NOT used in the gate.
+  ddg_gate_column: exp_ddg  # Historical compiled apo-MONOMER column, now audited as
+                            # state-heterogeneous. exp_ddg_dimer was not used in the gate.
   cross_check: [foldx, rosetta_cartesian_ddg]
   # M3 validates on this 8-variant subset BEFORE scaling to the full 54 controls.
   # Every entry must exist in the controls (build.py enforces).
@@ -298,7 +298,7 @@ validation:                 # Stage 5 — the GATE (README §2.2)
     [F64A, I18V, I113T, A4V, G93A, G93S, I149A, G93V]
   min_gate_points: 6            # require >= this many gate_subset variants (FEP + exp) to judge
                                 # (8 submitted, so 2 may fail/not converge and the gate still stands)
-  max_rmse_kcal: 1.5            # CONFIRM THIS NUMBER. Correlation alone cannot see a constant
+  max_rmse_kcal: 1.5            # Frozen gate-of-record threshold. Correlation alone cannot see a constant
                                 # offset or a wrong slope; RMSE is the "can I trust one number"
                                 # metric. Both r and RMSE must pass.
   destabilizing_ddg_kcal: 1.0   # classify a variant destabilizing if FEP ddG > this (kcal/mol)
@@ -353,9 +353,52 @@ cluster:
   cuda_module: ""                   # usually unnecessary -- the gromacs module pulls its own
                                     # CUDA. Set e.g. "cuda/12.8" only if gmx reports no GPU.
   gpu_c: "7.0"                   # request GPUs by compute capability >=7.0, not by model name
-  gpus_available: 8              # planning/throughput number ONLY -- not requested in a single qsub
+  gpus_available: 8              # Conservative planning value verified against the 2026-09-14
+                                  # qgpus snapshot (9 free in the 40-GPU shared l40s queue).
+                                  # Dynamic/fair-share, not a guaranteed per-user allocation and
+                                  # not requested in a single qsub.
   pe_omp: 8                      # -pe omp slots (CPU cores per task)
   max_walltime_hr: 12            # stay <=12h to keep buy-in nodes in the pool
   array_unit: [variant, leg, window, replicate]   # one SGE array task (qsub -t) per tuple
   checkpoint: true
   trajectory_retention: estimates_only            # keep ddG + analysis, drop raw frames
+
+# Post-verdict exploratory analysis; these settings never enter the historical gate.
+forensic_review:
+  main_archive: ../sod1fep_archive_2026-09-11
+  ss_archive: ../sod1fep_archive_2026-09-14/G93A_SS_diagnostic
+  output_dir: docs/review
+  bootstrap_draws: 2000
+  bootstrap_seed: 20260914
+  confidence_level: 0.95
+  # Numerical reproduction tolerance, not a scientific success threshold.
+  reproduction_atol_kcal: 0.00000001
+  release_file: releases/sod1fep-forensic-review.tar.gz
+  # Retrospective time-resolved analysis. These settings were fixed in
+  # docs/temporal_analysis_design.md before the first execution on 2026-09-14.
+  # They are exploratory and never enter the historical validation gate.
+  temporal:
+    output_dir: docs/temporal_review
+    checkpoints: [0.25, 0.50, 0.75, 1.00]
+    comparison_block: [0.75, 1.00]
+    primary_variants: [F64A, I18V, I113T, G93A, G93S, I149A, G93V]
+    secondary_variants: [A4V]
+    # Historical retained production durations, verified against the archived
+    # prod.mdp for the main cohort and the attempt-2 run record for A4V.
+    retained_duration_ns:
+      primary:
+        folded: 3.0
+        unfolded: 3.0
+      A4V_attempt2:
+        folded: 9.0
+        unfolded: 3.0
+    endpoints:
+      subsequent_movement: absolute_prefix_minus_final_quarter_same_repeat
+      sibling_disagreement: absolute_prefix_minus_other_repeats_full_mean
+    outputs:
+      report: temporal_diagnostic.json
+      leg_records: temporal_leg_records.csv
+      ddg_records: temporal_ddg_records.csv
+      adjacent_records: temporal_adjacent_discrepancies.csv
+      trajectories_figure: temporal_trajectories.png
+      local_figure: temporal_local_diagnostics.png
