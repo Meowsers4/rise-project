@@ -145,4 +145,7 @@ was restored after the diagnostic or that the SS tree has a second SCC copy.
 120 NPZs and that all three folded `hybrid.top` files have SHA-256
 `ed830d0b5085113245f8c914437684b79cac624d8343c796839803bfb446a8b5`, matching the local 2SH
 archive. The baseline restoration is therefore verified. A bounded SCC search found only the
-live `results/fep/G93A_SS_diagnostic` tree, so the second SCC archive copy remains to be made.
+live `results/fep/G93A_SS_diagnostic` tree. The user subsequently copied it to
+`/projectnb/rise-batteries/bode/archive_2026-09-14/G93A_SS_diagnostic`, confirmed 120 NPZs and
+the manifest, and obtained no output from `diff -qr` against the live tree. Remote archive
+verification is complete.

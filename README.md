@@ -376,9 +376,6 @@ sod1-fep/
   the gate-of-record.
 
 ### Still open for closeout
-- **SCC archive redundancy:** the live `results/fep/G93A` 2SH baseline was verified remotely
-  on 2026-09-14. Create and verify a second SCC copy of `G93A_SS_diagnostic`; the bounded
-  search found only its live results tree.
 - **Independent reproducibility check:** a second person should reproduce Table 3 and
   Figure 4 from the manifest and frozen inputs.
 - **Optional final artifact:** the evidence-locked outline and figure package are complete;
@@ -387,6 +384,10 @@ sod1-fep/
 
 The LiveCoMS inquiry was parked at the user's direction on 2026-09-14 and is not active
 project work.
+
+SCC archival verification is complete: the live G93A tree matches the 2SH baseline, and an
+identical 120-window SS diagnostic copy with its manifest is stored under
+`/projectnb/rise-batteries/bode/archive_2026-09-14/`.
 
 ### Closed — do not reopen
 - **Alternative target fallback (TTR):** **rejected.** TTR FEP/TI stability is

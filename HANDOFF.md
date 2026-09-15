@@ -122,10 +122,12 @@ Verified locally on 2026-09-14:
 `9ce591304f918ac1fab989588d0f0b5d5768ded0cf71297dca4a1f480b17f7d8`), so the live baseline
 restoration is closed.
 
-**Second SS copy still absent on the SCC.** A bounded search returned only the live
-`/projectnb/rise-batteries/bode/rise-project/results/fep/G93A_SS_diagnostic` tree. Make one
-non-overwriting archival copy, then confirm its manifest and 120 NPZs. This is archival work
-only; do not submit compute.
+**Second SS copy verified remotely 2026-09-14.** The user copied the live diagnostic to
+`/projectnb/rise-batteries/bode/archive_2026-09-14/G93A_SS_diagnostic`, confirmed 120 NPZs and
+the manifest, and obtained no output from `diff -qr` against the live tree. SCC archival
+verification is complete. The first copy attempt from the login home failed before writing
+anything because its relative source path did not exist; the successful copy was made from the
+repository root.
 
 ## CPU-only reproduction
 
