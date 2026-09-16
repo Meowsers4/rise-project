@@ -23,7 +23,10 @@ source scripts/scc_env.sh
 python -m src.fep.f64a_extension \
   --config pilots/f64a_sampling_extension_v1/config.yaml verify-tools
 
-SOURCE=/projectnb/rise-batteries/bode/archive_2026-09-11/fep/F64A/folded
+# The SCC retained source is the historical results tree.  The separately recorded
+# archive_2026-09-11 path is not present on the SCC; validation below proves this copy
+# against the frozen off-cluster archive manifest before staging it.
+SOURCE=/projectnb/rise-batteries/bode/rise-project/results/fep/F64A/folded
 python -m src.fep.f64a_extension \
   --config pilots/f64a_sampling_extension_v1/config.yaml \
   validate-source --source-folded "$SOURCE"

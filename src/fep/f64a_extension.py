@@ -562,10 +562,14 @@ def run_task(window: int, rep: int, config: str | Path = DEFAULT_PILOT_CONFIG,
 
     tpr = run_dir / "extension.tpr"
     if not tpr.exists():
-        temporary_tpr = run_dir / f"extension.tpr.building.{os.getpid()}"
+        # GROMACS infers the output type from the final suffix and appends ``.tpr``
+        # when it does not recognise one.  Keep the temporary name ending in .tpr
+        # and pass its absolute path so the file we validate is exactly the file
+        # convert-tpr writes.
+        temporary_tpr = run_dir / f"extension.building.{os.getpid()}.tpr"
         _run([gmx_command(cfg), "convert-tpr", "-s",
               str(source_run / "prod.tpr"), "-extend", str(extension_ps),
-              "-o", temporary_tpr.name], cwd=run_dir)
+              "-o", str(temporary_tpr)], cwd=run_dir)
         if not temporary_tpr.is_file() or temporary_tpr.stat().st_size == 0:
             raise ToolError(f"convert-tpr did not produce a usable {temporary_tpr}")
         temporary_tpr.replace(tpr)

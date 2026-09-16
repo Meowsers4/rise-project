@@ -163,7 +163,10 @@ def test_run_task_appends_in_private_copy_and_combines_3_plus_6_ns(tmp_path, mon
 
     def fake_run(argv, cwd, **kwargs):
         if "convert-tpr" in argv:
-            (Path(cwd) / argv[argv.index("-o") + 1]).write_bytes(b"extended tpr")
+            requested = Path(argv[argv.index("-o") + 1])
+            assert requested.is_absolute()
+            assert requested.suffix == ".tpr"
+            requested.write_bytes(b"extended tpr")
         return ""
 
     monkeypatch.setattr(extension, "_require_committed_code", _identity)
