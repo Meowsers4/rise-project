@@ -66,3 +66,20 @@ experiment as though it were a new matched benchmark.
 - Stable, agreeing endpoints still cannot distinguish shared trapping from force-field or
   experimental-reference mismatch.
 - No result from this pilot changes the frozen historical gate.
+
+## First-light operational amendment — 2026-09-15, before production
+
+The first real 10 ps continuation passed GROMACS's checkpoint/output checksum gate and
+completed normally. GROMACS preserved every numeric XVG row through 3499 ps but regenerated
+the checkpoint-boundary row at 3500 ps; the maximum reduced-potential difference in that
+single column was 0.1774940004106611. The other 3500 historical rows were byte-for-byte
+unchanged. This is the documented restart behavior in which output is restored to the last
+checkpoint before continuation.
+
+The integrity rule is therefore narrowed, not relaxed generally: source validation still
+requires exact 500–3500 ps agreement before execution; after continuation, 500–3499 ps must
+remain exact, only the 3500 ps boundary may differ, and its maximum absolute reduced-potential
+difference is recorded in every output NPZ. The regenerated boundary is never analyzed: the
+combined matrix keeps the checksum-frozen source's 3500 ps column and admits continuation
+columns beginning at exactly 3501 ps. Any earlier change, gap, duplicate, or non-finite value
+remains fatal.

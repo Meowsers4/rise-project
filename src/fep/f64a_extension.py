@@ -44,6 +44,7 @@ PILOT_GIT_PATHS = (
     "workflow/Snakefile",
     "config/pipeline.yaml",
 )
+APPEND_BOUNDARY_POLICY = "freeze_source_3500ps;retain_continuation_from_3501ps"
 
 
 def sha256_file(path: str | Path, block_size: int = 1024 * 1024) -> str:
@@ -231,12 +232,15 @@ def _xvg_times(path: Path) -> np.ndarray:
 
 
 def reconcile_energy_history(xvg: Path, baseline_npz: Path, cfg: dict, pilot: dict,
-                             expected_end_ps: float) -> np.ndarray:
-    """Validate the archived 0.5–3.5 ns energies and return only new columns.
+                             expected_end_ps: float) -> tuple[np.ndarray, float]:
+    """Validate the archived history and return new columns plus boundary drift.
 
     The exact integer-picosecond time grid detects gaps, duplicate restart records, and
     truncated appends. Re-parsing the archived 500–3500 ps records and comparing them
-    exactly with the frozen NPZ binds the XVG/checkpoint append set to that NPZ.
+    exactly with the frozen NPZ binds the XVG/checkpoint append set to that NPZ.  During
+    a continuation GROMACS may regenerate the record at the checkpoint boundary (3500
+    ps).  In that case 500–3499 ps must remain exact, the regenerated boundary is audited
+    but excluded, and the combined estimate retains the frozen source's 3500 ps column.
     """
     stride = float(pilot["energy_stride_ps"])
     expected_times = np.arange(0.0, expected_end_ps + 0.5 * stride, stride)
@@ -256,6 +260,8 @@ def reconcile_energy_history(xvg: Path, baseline_npz: Path, cfg: dict, pilot: di
     parsed = dhdl_to_u_kn(xvg, float(cfg["fep"]["temperature_K"]), 20)
     if parsed.shape[1] != len(times):
         raise ValueError(f"{xvg}: {len(times)} times but {parsed.shape[1]} energy rows")
+    if not np.isfinite(parsed).all():
+        raise ValueError(f"{xvg}: energy history contains non-finite values")
     baseline_start_ps = (
         float(pilot["baseline_total_time_ps"]) - float(pilot["baseline_ns"]) * 1000.0
     )
@@ -264,14 +270,23 @@ def reconcile_energy_history(xvg: Path, baseline_npz: Path, cfg: dict, pilot: di
     with np.load(baseline_npz) as baseline:
         frozen = np.asarray(baseline["u_kn_window"])
     reparsed = parsed[:, baseline_mask]
-    if reparsed.shape != frozen.shape or not np.array_equal(reparsed, frozen):
+    continued = expected_end_ps > float(pilot["baseline_total_time_ps"])
+    exact_reparsed = reparsed[:, :-1] if continued else reparsed
+    exact_frozen = frozen[:, :-1] if continued else frozen
+    if reparsed.shape != frozen.shape or not np.array_equal(exact_reparsed, exact_frozen):
         detail = f"shape {reparsed.shape} vs {frozen.shape}"
         if reparsed.shape == frozen.shape:
-            detail = f"maximum absolute difference {np.max(np.abs(reparsed - frozen))}"
+            detail = (
+                "maximum absolute difference before the restart boundary "
+                f"{np.max(np.abs(exact_reparsed - exact_frozen))}"
+            )
         raise ValueError(
-            f"{xvg}: archived 500–3500 ps energies do not exactly match {baseline_npz} "
+            f"{xvg}: stable archived energies do not exactly match {baseline_npz} "
             f"({detail})"
         )
+    boundary_difference = (
+        float(np.max(np.abs(reparsed[:, -1] - frozen[:, -1]))) if continued else 0.0
+    )
 
     new_mask = times > float(pilot["baseline_total_time_ps"])
     new = parsed[:, new_mask]
@@ -280,7 +295,7 @@ def reconcile_energy_history(xvg: Path, baseline_npz: Path, cfg: dict, pilot: di
     ))
     if new.shape != (20, expected_new):
         raise ValueError(f"{xvg}: new energy shape {new.shape}, expected (20, {expected_new})")
-    return new
+    return new, boundary_difference
 
 
 def validate_source(source_folded: str | Path,
@@ -480,6 +495,7 @@ def _validate_output_npz(path: Path, pilot: dict, extension_ps: float,
             "extension_samples", "git_commit", "pilot_code_sha256",
             "pilot_config_sha256",
             "base_config_sha256",
+            "append_boundary_policy", "append_boundary_max_abs_reduced_potential_difference",
         }
         missing = sorted(required - set(data.files))
         if missing:
@@ -502,6 +518,7 @@ def _validate_output_npz(path: Path, pilot: dict, extension_ps: float,
             "pilot_code_sha256": expected_identity["pilot_code_sha256"],
             "pilot_config_sha256": stage_manifest["pilot_config_sha256"],
             "base_config_sha256": stage_manifest["base_config_sha256"],
+            "append_boundary_policy": APPEND_BOUNDARY_POLICY,
         }
         source_key = f"source/F64A/folded/{path.name}"
         staged_hashes = {row["path"]: row["sha256"] for row in stage_manifest["files"]}
@@ -516,6 +533,9 @@ def _validate_output_npz(path: Path, pilot: dict, extension_ps: float,
             problems.append(f"baseline_samples={data['baseline_samples']}")
         if int(data["extension_samples"]) != expected_extension:
             problems.append(f"extension_samples={data['extension_samples']}")
+        boundary_difference = float(data["append_boundary_max_abs_reduced_potential_difference"])
+        if not np.isfinite(boundary_difference) or boundary_difference < 0:
+            problems.append(f"invalid append boundary difference={boundary_difference}")
     if problems:
         raise ValueError(f"{path}: invalid pilot output: {'; '.join(problems)}")
 
@@ -577,7 +597,7 @@ def run_task(window: int, rep: int, config: str | Path = DEFAULT_PILOT_CONFIG,
 
     ext_path = run_dir / "dhdl.xvg"
     expected_end_ps = float(pilot["baseline_total_time_ps"]) + extension_ps
-    u_ext = reconcile_energy_history(
+    u_ext, boundary_difference = reconcile_energy_history(
         ext_path, source_npz, cfg, pilot, expected_end_ps,
     )
     expected_ext = (int(round(extension_ps / float(pilot["energy_stride_ps"]))))
@@ -609,6 +629,8 @@ def run_task(window: int, rep: int, config: str | Path = DEFAULT_PILOT_CONFIG,
         pilot_code_sha256=stage_manifest["code_identity"]["pilot_code_sha256"],
         pilot_config_sha256=stage_manifest["pilot_config_sha256"],
         base_config_sha256=stage_manifest["base_config_sha256"],
+        append_boundary_policy=APPEND_BOUNDARY_POLICY,
+        append_boundary_max_abs_reduced_potential_difference=boundary_difference,
     )
     tmp.replace(out)
     _validate_output_npz(out, pilot, extension_ps, stage_manifest)

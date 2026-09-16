@@ -174,7 +174,7 @@ def test_run_task_appends_in_private_copy_and_combines_3_plus_6_ns(tmp_path, mon
     monkeypatch.setattr(extension, "_run", fake_run)
     monkeypatch.setattr(extension, "_run_extension_mdrun", lambda cfg, run_dir: None)
     monkeypatch.setattr(extension, "reconcile_energy_history",
-                        lambda *args, **kwargs: np.ones((20, 6000)))
+                        lambda *args, **kwargs: (np.ones((20, 6000)), 0.0))
 
     out = run_task(0, 0, config)
 
@@ -184,6 +184,8 @@ def test_run_task_appends_in_private_copy_and_combines_3_plus_6_ns(tmp_path, mon
         assert int(data["extension_samples"]) == 6000
         assert str(data["git_commit"]) == identity["git_commit"]
         assert str(data["pilot_code_sha256"]) == identity["pilot_code_sha256"]
+        assert str(data["append_boundary_policy"]) == extension.APPEND_BOUNDARY_POLICY
+        assert float(data["append_boundary_max_abs_reduced_potential_difference"]) == 0.0
     private_run = root / "fep/F64A/folded/w0_r0"
     assert (private_run / "prod.cpt").read_bytes() == b"test-prod.cpt"
     assert (private_run / "prod.log").read_bytes() == b"test-prod.log"
@@ -239,6 +241,8 @@ def test_first_light_gate_requires_finite_expected_output(tmp_path, monkeypatch)
         pilot_code_sha256=identity["pilot_code_sha256"],
         pilot_config_sha256=sha256_file(config),
         base_config_sha256=sha256_file(pilot["_base_config_path"]),
+        append_boundary_policy=extension.APPEND_BOUNDARY_POLICY,
+        append_boundary_max_abs_reduced_potential_difference=0.0,
     )
     monkeypatch.setattr(extension, "_require_committed_code", _identity)
     assert check_first_light(config) == path
@@ -260,13 +264,42 @@ def test_reconcile_energy_history_requires_exact_grid_and_baseline(tmp_path, mon
     full = np.zeros((20, 3501))
     full[:, 500:] = baseline
     monkeypatch.setattr(extension, "dhdl_to_u_kn", lambda *args, **kwargs: full)
-    assert reconcile_energy_history(xvg, npz, cfg, pilot, 3500.0).shape == (20, 0)
+    new, boundary_difference = reconcile_energy_history(xvg, npz, cfg, pilot, 3500.0)
+    assert new.shape == (20, 0)
+    assert boundary_difference == 0.0
 
     lines = xvg.read_text().splitlines()
     lines[2000] = "2001.0000 0"
     xvg.write_text("\n".join(lines) + "\n")
     with pytest.raises(ValueError, match="time grid is not exact"):
         reconcile_energy_history(xvg, npz, cfg, pilot, 3500.0)
+
+
+def test_reconcile_energy_history_allows_only_regenerated_restart_boundary(tmp_path,
+                                                                           monkeypatch):
+    import src.fep.f64a_extension as extension
+
+    config = _pilot_config(tmp_path)
+    cfg, pilot = load_pilot(config)
+    baseline = np.arange(20 * 3001, dtype=float).reshape(20, 3001)
+    npz = tmp_path / "w0_r0.npz"
+    np.savez(npz, u_kn_window=baseline)
+    xvg = tmp_path / "dhdl.xvg"
+    xvg.write_text("\n".join(f"{i}.0000 0" for i in range(3511)) + "\n")
+    full = np.zeros((20, 3511))
+    full[:, 500:3501] = baseline
+    full[:, 3500] += 0.1774940004106611
+    full[:, 3501:] = 7.0
+    monkeypatch.setattr(extension, "dhdl_to_u_kn", lambda *args, **kwargs: full)
+
+    new, boundary_difference = reconcile_energy_history(xvg, npz, cfg, pilot, 3510.0)
+    assert new.shape == (20, 10)
+    assert np.all(new == 7.0)
+    assert boundary_difference == pytest.approx(0.1774940004106611)
+
+    full[:, 3499] += 0.01
+    with pytest.raises(ValueError, match="stable archived energies"):
+        reconcile_energy_history(xvg, npz, cfg, pilot, 3510.0)
 
 
 def test_existing_output_rejects_wrong_protocol(tmp_path):
@@ -289,6 +322,8 @@ def test_existing_output_rejects_wrong_protocol(tmp_path):
         git_commit=identity["git_commit"], pilot_code_sha256=identity["pilot_code_sha256"],
         pilot_config_sha256=sha256_file(config),
         base_config_sha256=sha256_file(pilot["_base_config_path"]),
+        append_boundary_policy="freeze_source_3500ps;retain_continuation_from_3501ps",
+        append_boundary_max_abs_reduced_potential_difference=0.0,
     )
     with pytest.raises(ValueError, match="protocol=wrong"):
         _validate_output_npz(path, pilot, 6000.0, manifest)

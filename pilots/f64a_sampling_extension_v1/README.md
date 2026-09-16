@@ -53,7 +53,10 @@ PY
 
 The `git status` command above must print nothing. Source validation checks the exact
 0–3500 ps time grid and re-parses 500–3500 ps from every archived `dhdl.xvg`; those
-energies must exactly equal the checksum-frozen NPZ before any GPU work is staged.
+energies must exactly equal the checksum-frozen NPZ before any GPU work is staged. After
+restart, 500–3499 ps must remain exact. GROMACS may regenerate the 3500 ps checkpoint
+boundary; that value is audited but excluded in favor of the frozen source column, and
+only exact-grid continuation samples beginning at 3501 ps are admitted.
 
 The expected first-light shape is `(20, 3011)` and the finite flag must be `True`. Have
 the package enforce the same check; only then stage production and submit the bounded array:
