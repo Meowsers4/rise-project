@@ -137,6 +137,12 @@ the old primary analysis or first-light gate under the later CPU code identity.
 
 ## CPU selection sensitivity (authorized 2026-09-16)
 
+**Completed:** the [preserved sensitivity result](../../docs/f64a_selection_sensitivity_results.md)
+shows mean late movement under all three policies, but policy-sensitive movement
+in r0. The [draft 9→15 ns design](../../docs/f64a_continuation_9_to_15_design.md) is
+separate planning, not authorization to resubmit this pilot. The CPU command below
+is execution history; its existing output is immutable.
+
 The completed disjoint-block report and its interpretation are preserved in
 [`docs/f64a_block_analysis_results.md`](../../docs/f64a_block_analysis_results.md).
 The next CPU-only package compares adaptive trimming with fixed 0% and 25% cutoffs

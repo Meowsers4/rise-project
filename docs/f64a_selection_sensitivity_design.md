@@ -4,6 +4,9 @@ The user authorized this CPU-only package after inspecting the
 [disjoint-block results](f64a_block_analysis_results.md). It is exploratory and
 post-result, not a preregistered convergence test. No new GPU sampling is authorized.
 
+Completed on SCC: see the [preserved report and results](f64a_selection_sensitivity_results.md).
+The design below records the analysis as fixed before that run.
+
 Question: does final-half movement persist when within-block cutoffs are fixed,
 rather than re-estimated separately for every window and half?
 

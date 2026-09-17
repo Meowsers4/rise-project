@@ -78,7 +78,9 @@ overlap matrices, and signed local discrepancies. See
 arm is selected or authorized by this report. The completed
 [block results](f64a_block_analysis_results.md) show downward movement in all three
 repeats within the final block, alongside changing trimming choices. The user then
-authorized the isolated [CPU selection sensitivity](f64a_selection_sensitivity_design.md).
-The frozen failed historical gate remains
-unchanged. This result and the existing benchmark audit should be reviewed by
-**Peter Vlasov**; no mentor message has been sent by the agent.
+authorized the isolated [CPU selection sensitivity](f64a_selection_sensitivity_design.md),
+now [completed](f64a_selection_sensitivity_results.md). Its mean late movement
+persists across policies, while r0 is selection-sensitive. The next GPU proposal is
+the [draft 9→15 ns continuation](f64a_continuation_9_to_15_design.md), not yet
+authorized for submission. The frozen failed historical gate remains unchanged.
+Mentor review is deferred at the user's direction; no mentor message has been sent.

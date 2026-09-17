@@ -45,6 +45,8 @@ slow mode can be identified from energy records alone.
 
 Conclusion: 9 ns convergence remains unestablished. The next authorized step is the
 [CPU selection-policy sensitivity](f64a_selection_sensitivity_design.md), not a new
-GPU arm. The historical failed gate and F64A exclusion remain frozen. Peter Vlasov
-should review diagnostic interpretation and experimental-comparison defensibility;
-no mentor message has been sent.
+GPU arm. That sensitivity has now completed; see
+[its result](f64a_selection_sensitivity_results.md) and the
+[draft 9→15 ns design](f64a_continuation_9_to_15_design.md).
+The historical failed gate and F64A exclusion remain frozen. Mentor review is
+deferred at the user's direction, not a prerequisite; no mentor message has been sent.
