@@ -241,6 +241,104 @@ rule f64a_extension_sensitivity:
         'python -m src.analysis.f64a_sensitivity --config {input.config:q}'
 
 
+# ---- Authorized v2 continuation: never alter completed v1 -----------------
+F64A_V2_CONFIG = 'pilots/f64a_sampling_extension_v2/config.yaml'
+F64A_V2 = yaml.safe_load(Path(F64A_V2_CONFIG).read_text())
+F64A_V2_ROOT = F64A_V2['output_root']
+
+def completed_f64a_v2_sources(wildcards):
+    # Source inventories/approvals are created by explicit preflight, never a
+    # producer that can silently rerun the historical simulation.
+    admission = F64A_V2_ROOT + '/admission.json'
+    if not Path(admission).is_file():
+        raise FileNotFoundError('v2 needs explicit resource admission: ' + admission)
+    files = json.loads(Path(admission).read_text())['source_inventory']['files']
+    missing = [e['source'] for e in files if not Path(e['source']).is_file()]
+    if missing:
+        raise FileNotFoundError('v2 requires completed sources; will not schedule GPU work: ' + missing[0])
+    return ancient([admission] + [e['source'] for e in files])
+
+localrules: f64a_v2_stage_light, f64a_v2_stage_production, f64a_v2_analysis
+
+rule f64a_v2_stage_light:
+    input:
+        sources=completed_f64a_v2_sources,
+        config=F64A_V2_CONFIG,
+        code='src/fep/f64a_continuation.py',
+    output:
+        F64A_V2_ROOT + '/first_light/stage_manifest.json',
+    shell:
+        'python -m src.fep.f64a_continuation --config {input.config:q} stage --first-light'
+
+rule f64a_v2_first_light:
+    input:
+        stage=rules.f64a_v2_stage_light.output,
+        config=F64A_V2_CONFIG,
+        code='src/fep/f64a_continuation.py',
+    output:
+        F64A_V2_ROOT + '/first_light/fep/F64A/folded/w0_r0.npz',
+    resources:
+        gpu=1,
+    shell:
+        'python -m src.fep.f64a_continuation --config {input.config:q} '
+        'run --window 0 --rep 0 --first-light'
+
+rule f64a_v2_stage_production:
+    input:
+        sources=completed_f64a_v2_sources,
+        first_light=rules.f64a_v2_first_light.output,
+        config=F64A_V2_CONFIG,
+        code='src/fep/f64a_continuation.py',
+    output:
+        F64A_V2_ROOT + '/production/stage_manifest.json',
+    shell:
+        'python -m src.fep.f64a_continuation --config {input.config:q} stage'
+
+rule f64a_v2_window:
+    input:
+        stage=rules.f64a_v2_stage_production.output,
+        first_light=rules.f64a_v2_first_light.output,
+        config=F64A_V2_CONFIG,
+        code='src/fep/f64a_continuation.py',
+    output:
+        F64A_V2_ROOT + '/production/fep/F64A/folded/w{window}_r{rep}.npz',
+    wildcard_constraints:
+        window='(?:[0-9]|1[0-9])', rep='[0-2]',
+    resources:
+        gpu=1,
+    shell:
+        'python -m src.fep.f64a_continuation --config {input.config:q} '
+        'run --window {wildcards.window} --rep {wildcards.rep}'
+
+def completed_f64a_v2_outputs(wildcards):
+    paths = [F64A_V2_ROOT + '/admission.json', F64A_V2_ROOT + '/production/stage_manifest.json'] + expand(
+        F64A_V2_ROOT + '/production/fep/F64A/folded/w{window}_r{rep}.npz',
+        window=range(F64A_V2['lambda_windows']), rep=range(F64A_V2['replicates']))
+    missing = [p for p in paths if not Path(p).is_file()]
+    if missing:
+        raise FileNotFoundError('v2 CPU analysis needs completed outputs; will not schedule GPU work: ' + missing[0])
+    return ancient(paths)
+
+rule f64a_v2_analysis:
+    input:
+        completed=completed_f64a_v2_outputs,
+        config=F64A_V2_CONFIG,
+        design='pilots/f64a_sampling_extension_v2/PREREGISTRATION.md',
+        analysis_config=F64A_V2['analysis_config'],
+        code='src/analysis/f64a_continuation.py',
+        simulation='src/fep/f64a_continuation.py',
+        blocks='src/analysis/f64a_blocks.py',
+        sensitivity='src/analysis/f64a_sensitivity.py',
+        estimator='src/fep/analyze.py',
+        reference=F64A_V2['reference_primary'],
+    output:
+        F64A_V2_ROOT + '/production/analysis/f64a_continuation_v2.json',
+    resources:
+        gpu=0,
+    shell:
+        'python -m src.analysis.f64a_continuation --config {input.config:q}'
+
+
 # ---- Stage 4: unbiased mechanism MD (flagged subset only) ------------------
 rule md_mechanism:
     input:

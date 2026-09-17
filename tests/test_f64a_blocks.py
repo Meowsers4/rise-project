@@ -286,6 +286,10 @@ def test_snakemake_cpu_target_uses_completed_inputs_and_never_schedules_gpu(tmp_
     (package / "cpu_blocks.yaml").write_bytes(blocks.DEFAULT_CONFIG.read_bytes())
     (package / "cpu_sensitivity.yaml").write_bytes(
         (ROOT / "pilots/f64a_sampling_extension_v1/cpu_sensitivity.yaml").read_bytes())
+    package_v2 = tmp_path / "pilots/f64a_sampling_extension_v2"
+    package_v2.mkdir()
+    for name in ("config.yaml", "analysis.yaml"):
+        (package_v2 / name).write_bytes((ROOT / "pilots/f64a_sampling_extension_v2" / name).read_bytes())
     (tmp_path / "src").symlink_to(ROOT / "src", target_is_directory=True)
     (tmp_path / "docs").symlink_to(ROOT / "docs", target_is_directory=True)
     (tmp_path / "data").symlink_to(ROOT / "data", target_is_directory=True)

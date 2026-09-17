@@ -1,0 +1,36 @@
+# User selected this bounded arm on 2026-09-17; never edit v1/base configs.
+base_config: config/pipeline.yaml
+source_config: pilots/f64a_sampling_extension_v1/config.yaml
+pilot_id: f64a_sampling_extension_v2
+status: authorized_2026-09-17
+variant: F64A
+leg: folded
+lambda_windows: 20
+replicates: 3
+source_protocol: bf6841ccb3b9de79
+baseline_ns: 9.0
+extension_ns: 6.0
+target_ns: 15.0
+baseline_total_time_ps: 9500.0
+energy_stride_ps: 1.0
+baseline_samples_per_window: 9001
+target_samples_per_window: 15001
+first_light_extension_ps: 10.0
+source_production: results/pilots/f64a_sampling_extension_v1/production
+output_root: results/pilots/f64a_sampling_extension_v2
+trajectory_retention: estimates_only
+max_concurrent_tasks: 8
+gpu_type: L40S
+walltime: "12:00:00"
+first_light_walltime: "01:00:00"
+project: rise-batteries
+cpu_slots: 8
+prior_job_id: 7589742
+reference_primary: docs/f64a_extension_review/f64a_extension.json
+reference_blocks: docs/f64a_extension_review/f64a_blocks_v1.json
+reference_sensitivity: docs/f64a_extension_review/f64a_selection_sensitivity_v1.json
+# Conservative planning margins, not scientific thresholds. Budget is supplied
+# explicitly to admit after measured accounting and quota review, not guessed here.
+runtime_headroom_multiplier: 2.0
+storage_headroom_multiplier: 2.0
+analysis_config: pilots/f64a_sampling_extension_v2/analysis.yaml

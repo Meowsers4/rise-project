@@ -153,6 +153,10 @@ def test_snakemake_sensitivity_cpu_only_and_missing_report_fatal(tmp_path):
                  "pilots/f64a_sampling_extension_v1/cpu_blocks.yaml",
                  "pilots/f64a_sampling_extension_v1/cpu_sensitivity.yaml"):
         (tmp_path / path).write_bytes((ROOT / path).read_bytes())
+    v2_package = tmp_path / "pilots/f64a_sampling_extension_v2"
+    v2_package.mkdir()
+    for name in ("config.yaml", "analysis.yaml"):
+        (v2_package / name).write_bytes((ROOT / "pilots/f64a_sampling_extension_v2" / name).read_bytes())
     pilot = yaml.safe_load((ROOT / "pilots/f64a_sampling_extension_v1/config.yaml").read_text())
     pilot["output_root"] = "mock_completed"
     (tmp_path / "pilots/f64a_sampling_extension_v1/config.yaml").write_text(yaml.safe_dump(pilot))

@@ -1,12 +1,14 @@
-# Draft F64A 9→15 ns exact-path continuation design — 2026-09-16
+# F64A 9→15 ns exact-path continuation design — drafted 2026-09-16
 
 ## Status and question
 
-The user requested documentation and an explanation of the next design. This is
-a **proposal**, not an executable package or GPU submission authorization. No new
-job has been launched. Mentor review is deferred at the user's direction and is
-not a prerequisite. Implementation/submission require explicit user selection;
-commit the final registered design and package before execution.
+The user requested this design on 2026-09-16 and explicitly selected implementation
+and pre-submission work on 2026-09-17. The isolated
+[v2 package](../pilots/f64a_sampling_extension_v2/README.md) and
+[registration](../pilots/f64a_sampling_extension_v2/PREREGISTRATION.md) implement this
+arm. No new job has been launched from the local workspace. Resource admission and
+successful first light remain mandatory before production. Mentor review is deferred
+at the user's direction, not a prerequisite. Commit/push before cluster execution.
 
 Question: **does another fixed 6 ns of sampling reduce late time dependence in the
 same F64A folded paths, across the three declared selection policies?**

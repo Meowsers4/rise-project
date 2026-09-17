@@ -1,0 +1,21 @@
+analysis_id: f64a_continuation_9_to_15_v2
+output_name: f64a_continuation_v2.json
+reproduction_atol: 0.00000001
+policies:
+  - {label: adaptive, method: adaptive_trim_and_thin}
+  - {label: untrimmed, method: fixed_trim_and_thin, trim_fraction: 0.0}
+  - {label: fixed_25_percent, method: fixed_trim_and_thin, trim_fraction: 0.25}
+blocks:
+  - {label: block_6_9_ns, start: 6001, stop: 9001}
+  - {label: block_9_12_ns, start: 9001, stop: 12001}
+  - {label: block_12_15_ns, start: 12001, stop: 15001}
+  - {label: block_12_13p5_ns, start: 12001, stop: 13501}
+  - {label: block_13p5_15_ns, start: 13501, stop: 15001}
+contrasts:
+  - {label: primary_new_blocks, earlier: block_9_12_ns, later: block_12_15_ns}
+  - {label: secondary_prior_to_new, earlier: block_6_9_ns, later: block_9_12_ns}
+  - {label: secondary_final_halves, earlier: block_12_13p5_ns, later: block_13p5_15_ns}
+cumulative:
+  - {label: cumulative_9_ns, start: 0, stop: 9001}
+  - {label: cumulative_12_ns, start: 0, stop: 12001}
+  - {label: cumulative_15_ns, start: 0, stop: 15001}
