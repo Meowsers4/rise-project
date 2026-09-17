@@ -1,5 +1,11 @@
 # Isolated F64A 3→9 ns continuation package
 
+**Completed 2026-09-16:** production array 7589742 produced 60 validated outputs.
+The mean folded-leg estimate shifted by −0.933 kcal/mol and repeat range fell 71%,
+without establishing convergence at 9 ns. The supplied SCC report and interpretation
+are preserved in [the result record](../../docs/f64a_extension_results.md).
+GPU instructions below are execution history, **not** a request to resubmit.
+
 This package continues the exact archived F64A folded trajectories for 6 ns. Read
 [`PREREGISTRATION.md`](PREREGISTRATION.md) before submitting. The old general-purpose
 `scripts/submit_array.sh` is not used.
@@ -98,3 +104,33 @@ not added to the default target: `rule all` remains the frozen CPU forensic rele
 Archive staging remains an explicit operation because it creates a hashed copy of an external
 immutable archive. GPU dispatch uses the dedicated SGE scripts, matching the existing Stage 3
 one-window-per-task scheduler contract and its `-tc 8`/exit-99 rescheduling behavior.
+
+## Authorized CPU follow-up (not yet run on real extended data)
+
+The [block-analysis design](../../docs/f64a_block_analysis_design.md) is fixed after the
+primary report, before follow-up execution. It compares disjoint 3 ns blocks and the two
+halves of the final block, retaining each window's t0/g/selected counts and each signed
+adjacent discrepancy. The original GPU config and primary JSON are not modified.
+
+After job 7589742 has completely left the queue, deploy the committed CPU package and run:
+
+```bash
+source scripts/scc_env.sh
+python -m src.analysis.f64a_blocks \
+  --config pilots/f64a_sampling_extension_v1/cpu_blocks.yaml
+```
+
+The new immutable output is `production/analysis/f64a_blocks_v1.json` below the pilot root.
+The analyzer requires the original cluster report to agree with the preserved supplied
+report, fingerprints all 60 production matrices, and checks reproduction of its first
+and final 3 ns blocks before writing any result.
+
+For explicit CPU-only Snakemake execution, exclude the historical GPU producers:
+
+```bash
+snakemake f64a_extension_blocks --snakefile workflow/Snakefile --cores 1 \
+  --allowed-rules f64a_extension_blocks
+```
+
+Missing completed inputs are fatal; this command cannot schedule GPU work. Do not rerun
+the old primary analysis or first-light gate under the later CPU code identity.

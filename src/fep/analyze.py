@@ -63,8 +63,32 @@ def decorrelate_window(u: np.ndarray, lambda_index: int) -> np.ndarray:
     Returns:
         ``(n_states, n_independent)`` -- the same rows, decorrelated columns.
     """
+    return decorrelate_window_with_diagnostics(u, lambda_index)[0]
+
+
+def decorrelate_window_with_diagnostics(
+    u: np.ndarray, lambda_index: int,
+) -> tuple[np.ndarray, dict]:
+    """Use the historical selection algorithm and expose its trimming/thinning choices.
+
+    Retained counts and estimated correlation times are conditional energy-observable
+    diagnostics, not evidence that unsampled conformational modes have equilibrated.
+    Cutoffs and selected-column indices are relative to the supplied block.
+    """
+    if u.ndim != 2 or not 0 <= lambda_index < u.shape[0] or u.shape[1] == 0:
+        raise ValueError("invalid window shape or sampled-state index")
+    if not np.isfinite(u).all():
+        raise ValueError("window contains non-finite reduced potentials")
+    nbr = lambda_index + 1 if lambda_index + 1 < u.shape[0] else lambda_index - 1
     if u.shape[1] < _MIN_SAMPLES_TO_DECORRELATE:
-        return u
+        return u, {
+            "method": "short_block_no_thinning", "neighbor_state": nbr,
+            "n_raw": int(u.shape[1]), "t0_self": 0, "t0_neighbor": 0,
+            "trim_start_column": 0, "g_self": 1.0, "g_neighbor": 1.0,
+            "subsample_g": 1.0, "n_after_trim": int(u.shape[1]),
+            "n_retained": int(u.shape[1]), "first_selected_column": 0,
+            "last_selected_column": int(u.shape[1] - 1),
+        }
     from pymbar import timeseries
 
     u_self = u[lambda_index]                       # potential of the state actually sampled
@@ -74,13 +98,24 @@ def decorrelate_window(u: np.ndarray, lambda_index: int) -> np.ndarray:
     # alchemical coordinate, the slow mode that actually limits this calculation. Take the
     # neighbour energy difference too (what MBAR consumes) and keep the LARGER g, so the
     # thinning can only ever be more conservative, never less.
-    nbr = lambda_index + 1 if lambda_index + 1 < u.shape[0] else lambda_index - 1
     du = u[nbr] - u_self if nbr >= 0 else u_self
     t0, g_self, _ = timeseries.detect_equilibration(u_self)
     t0_du, g_du, _ = timeseries.detect_equilibration(du)
+    t0_self = t0
     t0, g = max(t0, t0_du), max(g_self, g_du)
     keep = timeseries.subsample_correlated_data(u_self[t0:], g=g)
-    return u[:, t0:][:, keep]
+    selected = u[:, t0:][:, keep]
+    if not len(keep):
+        raise ValueError("equilibration/thinning retained no samples")
+    return selected, {
+        "method": "adaptive_trim_and_thin", "neighbor_state": nbr,
+        "n_raw": int(u.shape[1]), "t0_self": int(t0_self), "t0_neighbor": int(t0_du),
+        "trim_start_column": int(t0), "g_self": float(g_self), "g_neighbor": float(g_du),
+        "subsample_g": float(g), "n_after_trim": int(u.shape[1] - t0),
+        "n_retained": int(selected.shape[1]),
+        "first_selected_column": int(t0 + keep[0]),
+        "last_selected_column": int(t0 + keep[-1]),
+    }
 
 
 def load_leg_replicate(fep_dir: Path, variant: str, leg: str, rep: int, n_states: int,

@@ -171,6 +171,44 @@ rule f64a_extension_analysis:
         'python -m src.fep.f64a_extension --config {input.config:q} analyze'
 
 
+# CPU post-pilot analysis must consume completed GPU outputs, never schedule missing
+# ones. Use --allowed-rules f64a_extension_blocks to exclude all GPU producers.
+F64A_BLOCK_CONFIG = 'pilots/f64a_sampling_extension_v1/cpu_blocks.yaml'
+F64A_BLOCK_DESIGN = yaml.safe_load(Path(F64A_BLOCK_CONFIG).read_text())
+
+def completed_f64a_block_inputs(wildcards):
+    paths = [
+        F64A_PILOT_ROOT + '/production/stage_manifest.json',
+        F64A_PILOT_ROOT + '/production/analysis/f64a_extension.json',
+    ] + expand(
+        F64A_PILOT_ROOT + '/production/fep/F64A/folded/w{window}_r{rep}.npz',
+        window=F64A_PILOT_WINDOWS, rep=F64A_PILOT_REPLICATES,
+    )
+    missing = [path for path in paths if not Path(path).is_file()]
+    if missing:
+        raise FileNotFoundError('CPU blocks require completed pilot inputs; '
+                                'will not schedule GPU work: ' + missing[0])
+    return ancient(paths)
+
+localrules: f64a_extension_blocks
+
+rule f64a_extension_blocks:
+    input:
+        completed=completed_f64a_block_inputs,
+        code='src/analysis/f64a_blocks.py',
+        estimator='src/fep/analyze.py',
+        validator='src/fep/f64a_extension.py',
+        config=F64A_BLOCK_CONFIG,
+        reference=F64A_BLOCK_DESIGN['reference_report'],
+        design='docs/f64a_block_analysis_design.md',
+    output:
+        F64A_PILOT_ROOT + '/production/analysis/' + F64A_BLOCK_DESIGN['output_name'],
+    resources:
+        gpu=0,
+    shell:
+        'python -m src.analysis.f64a_blocks --config {input.config:q}'
+
+
 # ---- Stage 4: unbiased mechanism MD (flagged subset only) ------------------
 rule md_mechanism:
     input:

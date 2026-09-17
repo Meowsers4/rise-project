@@ -1,0 +1,22 @@
+# Exploratory CPU follow-up fixed after the 3/6/9 ns report, before its first execution.
+# Does not modify the hashed GPU pilot config or the historical validation gate.
+analysis_id: f64a_block_analysis_v1
+pilot_config: pilots/f64a_sampling_extension_v1/config.yaml
+reference_report: docs/f64a_extension_review/f64a_extension.json
+output_name: f64a_blocks_v1.json
+method: adaptive_trim_and_thin
+reproduction_atol: 0.00000001
+
+# Half-open raw-column slices of the retained 9001-column matrix.
+# First block includes retained t=0; no boundary column is duplicated.
+blocks:
+  - {label: block_0_3_ns, start: 0, stop: 3001, reference: 3_ns}
+  - {label: block_3_6_ns, start: 3001, stop: 6001}
+  - {label: block_6_9_ns, start: 6001, stop: 9001, reference: final_3_ns}
+  - {label: block_6_7p5_ns, start: 6001, stop: 7501}
+  - {label: block_7p5_9_ns, start: 7501, stop: 9001}
+
+contrasts:
+  - {label: first_to_middle, earlier: block_0_3_ns, later: block_3_6_ns}
+  - {label: middle_to_final, earlier: block_3_6_ns, later: block_6_9_ns}
+  - {label: final_half_to_half, earlier: block_6_7p5_ns, later: block_7p5_9_ns}
