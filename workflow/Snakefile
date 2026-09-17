@@ -209,6 +209,38 @@ rule f64a_extension_blocks:
         'python -m src.analysis.f64a_blocks --config {input.config:q}'
 
 
+F64A_SENSITIVITY_CONFIG = 'pilots/f64a_sampling_extension_v1/cpu_sensitivity.yaml'
+F64A_SENSITIVITY_DESIGN = yaml.safe_load(Path(F64A_SENSITIVITY_CONFIG).read_text())
+
+def completed_f64a_sensitivity_inputs(wildcards):
+    paths = list(completed_f64a_block_inputs(wildcards))
+    block_report = F64A_PILOT_ROOT + '/production/analysis/f64a_blocks_v1.json'
+    if not Path(block_report).is_file():
+        raise FileNotFoundError('CPU sensitivity requires completed block report; '
+                                'will not schedule GPU work: ' + block_report)
+    return ancient(paths + [block_report])
+
+localrules: f64a_extension_sensitivity
+
+rule f64a_extension_sensitivity:
+    input:
+        completed=completed_f64a_sensitivity_inputs,
+        code='src/analysis/f64a_sensitivity.py',
+        blocks='src/analysis/f64a_blocks.py',
+        estimator='src/fep/analyze.py',
+        validator='src/fep/f64a_extension.py',
+        config=F64A_SENSITIVITY_CONFIG,
+        reference=F64A_SENSITIVITY_DESIGN['reference_report'],
+        block_reference=F64A_SENSITIVITY_DESIGN['block_reference'],
+        design='docs/f64a_selection_sensitivity_design.md',
+    output:
+        F64A_PILOT_ROOT + '/production/analysis/' + F64A_SENSITIVITY_DESIGN['output_name'],
+    resources:
+        gpu=0,
+    shell:
+        'python -m src.analysis.f64a_sensitivity --config {input.config:q}'
+
+
 # ---- Stage 4: unbiased mechanism MD (flagged subset only) ------------------
 rule md_mechanism:
     input:

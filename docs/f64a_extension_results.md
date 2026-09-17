@@ -75,6 +75,10 @@ compares disjoint 0–3, 3–6, and 6–9 ns blocks and the two halves of the fi
 while recording per-window trimming, correlation estimates, retained sample counts,
 overlap matrices, and signed local discrepancies. See
 [`f64a_block_analysis_design.md`](f64a_block_analysis_design.md). No additional GPU
-arm is selected or authorized by this report. The frozen failed historical gate remains
+arm is selected or authorized by this report. The completed
+[block results](f64a_block_analysis_results.md) show downward movement in all three
+repeats within the final block, alongside changing trimming choices. The user then
+authorized the isolated [CPU selection sensitivity](f64a_selection_sensitivity_design.md).
+The frozen failed historical gate remains
 unchanged. This result and the existing benchmark audit should be reviewed by
 **Peter Vlasov**; no mentor message has been sent by the agent.

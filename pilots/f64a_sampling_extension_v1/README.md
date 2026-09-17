@@ -134,3 +134,23 @@ snakemake f64a_extension_blocks --snakefile workflow/Snakefile --cores 1 \
 
 Missing completed inputs are fatal; this command cannot schedule GPU work. Do not rerun
 the old primary analysis or first-light gate under the later CPU code identity.
+
+## CPU selection sensitivity (authorized 2026-09-16)
+
+The completed disjoint-block report and its interpretation are preserved in
+[`docs/f64a_block_analysis_results.md`](../../docs/f64a_block_analysis_results.md).
+The next CPU-only package compares adaptive trimming with fixed 0% and 25% cutoffs
+on the final two halves. See
+[`docs/f64a_selection_sensitivity_design.md`](../../docs/f64a_selection_sensitivity_design.md).
+Run after transferring the committed update, with no array in flight:
+
+```bash
+source scripts/scc_env.sh
+python -m src.analysis.f64a_sensitivity \
+  --config pilots/f64a_sampling_extension_v1/cpu_sensitivity.yaml
+```
+
+This writes `production/analysis/f64a_selection_sensitivity_v1.json` under the pilot
+root. It never launches GPU work or overwrites the earlier reports. Keep the original
+`cpu_blocks.yaml`, GPU pilot config and base pipeline config unchanged; do not rerun
+the completed block command after updating analysis code.

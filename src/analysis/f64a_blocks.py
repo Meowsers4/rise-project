@@ -14,6 +14,7 @@ import yaml
 
 from src.fep.analyze import (
     _KB_KCAL,
+    _logmeanexp,
     decorrelate_window_with_diagnostics,
     solve_leg_mbar,
 )
@@ -80,6 +81,7 @@ def _analysis_identity(design: dict) -> dict:
     paths = [Path(__file__).resolve(), ROOT / "src/fep/analyze.py",
              ROOT / "src/fep/f64a_extension.py", Path(design["_config_path"]),
              Path(design["_reference_path"])]
+    paths += [Path(p) for p in design.get("_extra_identity_paths", [])]
     relative_paths = [str(path.relative_to(ROOT)) for path in paths]
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
                             capture_output=True, text=True).stdout.strip()
@@ -102,7 +104,8 @@ def _analysis_identity(design: dict) -> dict:
     }
 
 
-def solve_block(cfg: dict, pilot: dict, fep_dir: Path, block: dict, rep: int) -> dict:
+def solve_block(cfg: dict, pilot: dict, fep_dir: Path, block: dict, rep: int,
+                selector=decorrelate_window_with_diagnostics) -> dict:
     """Solve one block/repeat and retain all per-window and adjacent diagnostics."""
     start, stop = block["start"], block["stop"]
     windows, diagnostics = [], []
@@ -113,7 +116,7 @@ def solve_block(cfg: dict, pilot: dict, fep_dir: Path, block: dict, rep: int) ->
             u = np.asarray(data["u_kn_window"])
         if u.shape != (pilot["lambda_windows"], pilot["target_samples_per_window"]):
             raise ValueError("short or incompatible block input; refusing silent slicing")
-        selected, choices = decorrelate_window_with_diagnostics(u[:, start:stop], window)
+        selected, choices = selector(u[:, start:stop], window)
         windows.append(selected)
         record = {"window": window, **choices}
         for name in ("trim_start_column", "first_selected_column", "last_selected_column"):
@@ -143,6 +146,8 @@ def solve_block(cfg: dict, pilot: dict, fep_dir: Path, block: dict, rep: int) ->
         "adjacent_diagnostics": [
             {"lower_window": k, "upper_window": k + 1,
              "signed_discrepancy_kcal": float(value),
+             "forward_dg_kcal": -_logmeanexp(-(windows[k][k + 1] - windows[k][k])) * kt,
+             "reverse_dg_kcal": _logmeanexp(windows[k + 1][k + 1] - windows[k + 1][k]) * kt,
              "overlap_lower_to_upper": float(overlap[k, k + 1]),
              "overlap_upper_to_lower": float(overlap[k + 1, k])}
             for k, value in enumerate(local)

@@ -4,7 +4,9 @@
 
 The user authorized this CPU-only follow-up after viewing the completed 3/6/9 ns pilot
 report. It is **exploratory**: the cumulative results are already known. This analysis
-has not yet been run on the real extended matrices locally; those inputs remain on SCC.
+has now been run on SCC; the supplied report and interpretation are preserved in
+[the block results](f64a_block_analysis_results.md). The real extended matrices
+remain on SCC and have not been solved locally.
 The [prior results](f64a_extension_results.md) and their supplied JSON are preserved,
 not overwritten. This design selects no new GPU experiment and introduces no convergence
 pass/fail threshold.

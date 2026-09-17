@@ -1,0 +1,17 @@
+# Exploratory selection sensitivity, fixed after inspecting the adaptive block report.
+analysis_id: f64a_selection_sensitivity_v1
+pilot_config: pilots/f64a_sampling_extension_v1/config.yaml
+reference_report: docs/f64a_extension_review/f64a_extension.json
+block_reference: docs/f64a_extension_review/f64a_blocks_v1.json
+output_name: f64a_selection_sensitivity_v1.json
+method: adaptive_trim_and_thin
+reproduction_atol: 0.00000001
+policies:
+  - {label: adaptive, method: adaptive_trim_and_thin}
+  - {label: untrimmed, method: fixed_trim_and_thin, trim_fraction: 0.0}
+  - {label: fixed_25_percent, method: fixed_trim_and_thin, trim_fraction: 0.25}
+blocks:
+  - {label: block_6_7p5_ns, start: 6001, stop: 7501}
+  - {label: block_7p5_9_ns, start: 7501, stop: 9001}
+contrasts:
+  - {label: final_half_to_half, earlier: block_6_7p5_ns, later: block_7p5_9_ns}
