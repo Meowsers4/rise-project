@@ -4,6 +4,8 @@ User selected this bounded arm on 2026-09-17. Read
 [PREREGISTRATION.md](PREREGISTRATION.md) before execution. This package never modifies
 v1 or the historical folded/unfolded results. Mentor review is deferred.
 See [VERIFICATION.md](VERIFICATION.md) for completed local checks and pending SCC work.
+The [TPR header amendment](TPR_HEADER_AMENDMENT.md) documents the source-preflight
+false mismatch and its narrow, pre-execution correction.
 
 ## 1. Deployment and read-only checks
 

@@ -28,6 +28,7 @@ from src.prep.build import load_config
 ROOT = v1.ROOT
 DEFAULT_CONFIG = ROOT / "pilots/f64a_sampling_extension_v2/config.yaml"
 BOUNDARY_POLICY = "freeze_v1_500_to_9500ps;carry_3500ps_exception;new_from_9501ps"
+TPR_HASH_POLICY = "exclude_inputrec_nsteps_and_normalize_header_lambda_metadata_v1"
 
 
 def repo_path(value: str) -> Path:
@@ -137,14 +138,34 @@ def dump_tpr(cfg: dict, path: Path) -> str:
     return result.stdout
 
 
-def tpr_model_hash(dump: str) -> str:
-    """Hash the complete dumped model/state with only duration (nsteps) excluded."""
+def _canonical_tpr_model(dump: str) -> tuple[str, float]:
+    """Normalize duration and the non-active header lambda, never FEP parameters."""
     start = dump.find("inputrec:")
     if start < 0:
         raise ValueError("TPR dump has no inputrec section")
-    lines = [line.rstrip() for line in dump[start:].splitlines()
-             if not re.match(r"^\s*nsteps\s*=", line)]
-    return hashlib.sha256('\n'.join(lines).encode()).hexdigest()
+    lines, header_values, sections = [], [], []
+    section = None
+    for line in dump[start:].splitlines():
+        title = re.fullmatch(r"(\S[^:]*):\s*", line)
+        if title:
+            section = title[1]
+            sections.append(section)
+        if section == "inputrec" and re.match(r"^\s*nsteps\s*=", line):
+            continue
+        if section == "header" and re.match(r"^\s*lambda\s*=", line):
+            header_values.append(scalar(line, "lambda"))
+            line = "   lambda = <non-active-header-metadata>"
+        lines.append(line.rstrip())
+    if (any(sections.count(s) != 1 for s in ("inputrec", "header", "topology"))
+            or len(header_values) != 1 or not 0 <= header_values[0] <= 1):
+        raise ValueError("TPR dump needs unique inputrec/header/topology and valid header lambda")
+    return '\n'.join(lines), header_values[0]
+
+
+def tpr_model_hash(dump: str) -> str:
+    """Hash all model/state fields apart from declared duration/header metadata."""
+    text, _ = _canonical_tpr_model(dump)
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def check_tpr(cfg: dict, path: Path, window: int, end_ps: float,
@@ -160,9 +181,13 @@ def check_tpr(cfg: dict, path: Path, window: int, end_ps: float,
             or any(values[k] != 0 for k in ("nstxout", "nstvout", "nstfout", "nstxout-compressed"))):
         raise ValueError(f"{path}: incompatible TPR time/lambda/retention: {values}")
     model_hash = tpr_model_hash(dump)
+    _, header_lambda = _canonical_tpr_model(dump)
+    if header_lambda != 0:
+        raise ValueError(f"{path}: convert-tpr header lambda was not reset to zero")
     if expected_model_hash and model_hash != expected_model_hash:
-        raise ValueError("TPR changed more than duration; model/state mismatch")
-    values["model_sha256_excluding_nsteps"] = model_hash
+        raise ValueError(f"{path}: TPR model/state mismatch beyond duration/header metadata")
+    values.update(model_sha256=model_hash, model_hash_policy=TPR_HASH_POLICY,
+                  header_lambda_metadata=header_lambda)
     return values
 
 
@@ -241,9 +266,11 @@ def validate_source(config: str | Path = DEFAULT_CONFIG) -> dict:
             original_entry, = [e for e in old_stage["files"] if e["path"] == str(original.relative_to(root))]
             if v1.sha256_file(original) != original_entry["sha256"]:
                 raise ValueError("original v1 TPR changed since v1 staging")
-            model_hash = tpr_model_hash(dump_tpr(cfg, original))
+            original_dump = dump_tpr(cfg, original)
+            model_hash = tpr_model_hash(original_dump)
             tpr_records.append({"task": name, "values": check_tpr(
-                cfg, folded / name / "extension.tpr", window, pilot["baseline_total_time_ps"], model_hash)})
+                cfg, folded / name / "extension.tpr", window, pilot["baseline_total_time_ps"], model_hash),
+                "original_header_lambda_metadata": _canonical_tpr_model(original_dump)[1]})
             checkpoint_time(cfg, folded / name / "prod.cpt", pilot["baseline_total_time_ps"])
     for key, filename in (("reference_primary", "f64a_extension.json"),
                           ("reference_blocks", "f64a_blocks_v1.json"),
@@ -471,7 +498,7 @@ def run_task(window: int, rep: int, config: str | Path = DEFAULT_CONFIG,
                 v1._copy_atomic(source / name / filename, run / filename)
         tpr = run / "extension.tpr"
         end = pilot["baseline_total_time_ps"] + extension
-        expected_model, = [entry["values"]["model_sha256_excluding_nsteps"]
+        expected_model, = [entry["values"]["model_sha256"]
                            for entry in approved["source_inventory"]["tpr_checks"] if entry["task"] == name]
         if not tpr.exists():
             temporary_tpr = run / f"extension.building.{os.getpid()}.tpr"

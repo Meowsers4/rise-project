@@ -28,3 +28,18 @@ An SSH BatchMode check could not authenticate to SCC from this session. No crede
 were requested or changed. No source staging, cluster resource admission or submission
 was performed. Follow the [README](README.md) from the SCC shell after deployment;
 review the evidence before choosing budget values. Mentor review remains deferred.
+
+## Header-lambda correction, later on 2026-09-17
+
+The user deployed the initial package and started actual SCC source validation.
+It stopped at the original-versus-continuation TPR fingerprint after w0/r0–r2's
+checkpoint checks. The [technical amendment](TPR_HEADER_AMENDMENT.md) preserves
+the supplied w1/r0 comparison/diff and official-source explanation. Only the
+non-active header lambda is normalized; active FEP settings remain protected.
+
+After correction, the working-repository suite reports **242 passed** (58 v2
+tests), including regression coverage of the observed header reset and refusal
+of genuine FEP/model/state changes. Ruff, `git diff --check` and default Snakemake
+dry run pass. Existing v1 source/config hash checks still pass. No actual SCC
+full-source pass, admission or first-light result is claimed: rerun preflight
+after deploying the committed correction, with no array in flight.

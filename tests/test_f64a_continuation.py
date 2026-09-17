@@ -133,10 +133,16 @@ def test_real_tpr_fields_and_checkpoint_time_are_checked(tmp_path, monkeypatch):
     cfg, _ = continuation.load_pilot()
     dump = ("inputrec:\ndt = 0.002\nnsteps = 4750000\ninit-step = 0\ntinit = 0\n"
             "init-lambda-state = 7\nnstdhdl = 500\nnstxout = 0\nnstvout = 0\n"
-            "nstfout = 0\nnstxout-compressed = 0\n")
+            "nstfout = 0\nnstxout-compressed = 0\nheader:\n   lambda = 0\ntopology:\n")
     monkeypatch.setattr(continuation, "gmx_command", lambda cfg: "gmx")
     monkeypatch.setattr(continuation, "dump_tpr", lambda *a, **k: dump)
-    continuation.check_tpr(cfg, tmp_path / "extension.tpr", 7, 9500.)
+    values = continuation.check_tpr(cfg, tmp_path / "extension.tpr", 7, 9500.)
+    assert values['header_lambda_metadata'] == 0.
+    assert values['model_hash_policy'] == continuation.TPR_HASH_POLICY
+    monkeypatch.setattr(continuation, "dump_tpr", lambda *a, **k: dump.replace('lambda = 0\n', 'lambda = .2\n'))
+    with pytest.raises(ValueError, match='header lambda'):
+        continuation.check_tpr(cfg, tmp_path / "extension.tpr", 7, 9500.)
+    monkeypatch.setattr(continuation, "dump_tpr", lambda *a, **k: dump)
     with pytest.raises(ValueError):
         continuation.check_tpr(cfg, tmp_path / "prod.tpr", 7, 15500.)
     monkeypatch.setattr(continuation, "_run", lambda *a, **k: "t = 9500\n")
@@ -146,11 +152,60 @@ def test_real_tpr_fields_and_checkpoint_time_are_checked(tmp_path, monkeypatch):
 
 
 def test_tpr_model_fingerprint_allows_only_duration_change():
-    original = "source.tpr\ninputrec:\n   nsteps = 4750000\n   dt = 0.002\ntopology:\nx = 0.1\n"
+    original = ("source.tpr\ninputrec:\n   nsteps = 4750000\n   dt = 0.002\n"
+                "header:\n   lambda = 0\ntopology:\nx = 0.1\n")
     extended = original.replace("source.tpr", "extension.tpr").replace("4750000", "7750000")
     assert continuation.tpr_model_hash(original) == continuation.tpr_model_hash(extended)
     for modified in (extended.replace("0.002", "0.004"), extended.replace("x = 0.1", "x = 0.2")):
         assert continuation.tpr_model_hash(original) != continuation.tpr_model_hash(modified)
+
+
+def _header_lambda_dump():
+    return ("source.tpr\ninputrec:\n   nsteps = 1750000\n   dt = 0.002\n"
+            "   init-lambda-state = 1\n   init-lambda = -1\n   delta-lambda = 0\n"
+            "   fep-lambdas = 0 0.0588 1\nheader:\n   bV = present\n"
+            "   natoms = 38414\n   lambda = 5.880000e-02\n   buffer size = 1452987\n"
+            "topology:\n   name = PMX MODEL in water\nx (1x3):\n   x[0] = 0.1 0.2 0.3\n"
+            "v (1x3):\n   v[0] = 0.01 0.02 0.03\n")
+
+
+def test_observed_header_lambda_reset_does_not_change_model_fingerprint():
+    original = _header_lambda_dump()
+    extended = original.replace('1750000', '4750000').replace('lambda = 5.880000e-02', 'lambda = 0.000000e+00')
+    assert continuation.tpr_model_hash(original) == continuation.tpr_model_hash(extended)
+    assert continuation._canonical_tpr_model(original)[1] == .0588
+    assert continuation._canonical_tpr_model(extended)[1] == 0.
+
+
+@pytest.mark.parametrize('old,new', [
+    ('init-lambda-state = 1', 'init-lambda-state = 2'),
+    ('init-lambda = -1', 'init-lambda = 0'),
+    ('delta-lambda = 0', 'delta-lambda = 1'),
+    ('fep-lambdas = 0 0.0588 1', 'fep-lambdas = 0 0.2 1'),
+    ('bV = present', 'bV = not present'),
+    ('natoms = 38414', 'natoms = 38415'),
+    ('PMX MODEL in water', 'another topology'),
+    ('x[0] = 0.1', 'x[0] = 0.2'),
+    ('v[0] = 0.01', 'v[0] = 0.02'),
+])
+def test_header_normalization_never_hides_active_fep_or_model_changes(old, new):
+    original = _header_lambda_dump()
+    assert continuation.tpr_model_hash(original) != continuation.tpr_model_hash(original.replace(old, new))
+
+
+@pytest.mark.parametrize('corruption', ['missing', 'duplicate', 'nan', 'out_of_range'])
+def test_header_lambda_normalization_requires_valid_unique_metadata(corruption):
+    dump = _header_lambda_dump()
+    if corruption == 'missing':
+        dump = dump.replace('   lambda = 5.880000e-02\n', '')
+    elif corruption == 'duplicate':
+        dump = dump.replace('   lambda = 5.880000e-02', '   lambda = 0\n   lambda = 0')
+    elif corruption == 'nan':
+        dump = dump.replace('5.880000e-02', 'nan')
+    else:
+        dump = dump.replace('5.880000e-02', '2')
+    with pytest.raises(ValueError):
+        continuation.tpr_model_hash(dump)
 
 
 def _admission_fixture(tmp_path, monkeypatch):
@@ -168,7 +223,7 @@ def _admission_fixture(tmp_path, monkeypatch):
                           size_bytes=path.stat().st_size))
     source_inventory = dict(files=files, tasks=60, bytes=sum(e["size_bytes"] for e in files),
                             source_code_identity={"git_commit": "v1_synthetic"},
-                            tpr_checks=[dict(task='w0_r0', values={'model_sha256_excluding_nsteps': 'synthetic'})])
+                            tpr_checks=[dict(task='w0_r0', values={'model_sha256': 'synthetic'})])
     monkeypatch.setattr(continuation, "validate_source", lambda config: source_inventory)
     evidence = []
     for name, content in (("accounting", _accounting()), ("quota", "synthetic quota"),

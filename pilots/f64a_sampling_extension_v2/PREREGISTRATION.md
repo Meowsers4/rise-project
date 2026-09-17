@@ -91,4 +91,7 @@ review is deferred at user direction. Historical gate/exclusion/state remain fro
 TPR/checkpoint inspection uses the officially documented
 [`gmx dump` interface](https://manual.gromacs.org/documentation/2025.3/onlinehelp/gmx-dump.html).
 Duration-only edits use [`gmx convert-tpr -extend`](https://manual.gromacs.org/documentation/2025.3/onlinehelp/gmx-convert-tpr.html),
-with dumped model/state equality checked after excluding only `nsteps`.
+The original fingerprint excluded only `nsteps`. The documented
+[2026-09-17 technical pre-execution amendment](TPR_HEADER_AMENDMENT.md) corrects
+the non-active header-lambda false mismatch; all active FEP/model/state fields remain
+checked. Sampling, analysis, resource and first-light contracts are unchanged.
